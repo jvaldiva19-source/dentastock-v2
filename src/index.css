@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+/**
+ * Sistema de tokens de DentaStock v2.
+ *
+ * Tailwind v4 genera utilidades automáticamente a partir de estas
+ * variables: --color-ink-900 produce las clases bg-ink-900, text-ink-900,
+ * border-ink-900, etc. No se necesita tailwind.config.js para esto.
+ *
+ * Dirección de marca: sobria, elegante, corporativa. Ink profundo (no
+ * negro puro) para la navegación, un canvas cálido en vez de blanco
+ * clínico estéril, y un único acento — un teal apagado, referencia
+ * discreta al mundo dental sin caer en el azul genérico de cualquier
+ * panel administrativo. Los tres colores de estado están anclados a
+ * los mismos conceptos que ya usan v_analisis_reposicion y
+ * v_alertas_caducidad, para que el lenguaje visual sea uno solo en
+ * toda la aplicación.
+ */
+@theme {
+  /* Ink — barra lateral y elementos de máxima jerarquía */
+  --color-ink-900: #15202b;
+  --color-ink-800: #1c2b38;
+  --color-ink-700: #28394a;
+
+  /* Canvas — fondo del área operativa */
+  --color-canvas: #f6f5f1;
+  --color-canvas-card: #ffffff;
+  --color-border: #e3e1d8;
+
+  /* Texto */
+  --color-text-primary: #1b2430;
+  --color-text-muted: #6b7280;
+  --color-text-onink: #f6f5f1;
+  --color-text-onink-muted: #9aa7b5;
+
+  /* Acento único */
+  --color-accent: #0e7c7b;
+  --color-accent-soft: #e3f1f0;
+  --color-accent-strong: #0a5f5e;
+
+  /* Semáforo de estado — mismos conceptos que las vistas de PostgreSQL */
+  --color-status-critico: #c0392b;
+  --color-status-critico-soft: #fbe9e7;
+  --color-status-reorden: #b7791f;
+  --color-status-reorden-soft: #fdf3e0;
+  --color-status-ok: #1e7b4d;
+  --color-status-ok-soft: #e7f5ee;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  color: var(--color-text-primary);
+  background-color: var(--color-canvas);
+}

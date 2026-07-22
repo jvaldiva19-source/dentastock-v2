@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
-import type { StockUbicacion, Views } from '../types/database.types'
+import { obtenerTodasLasFilas } from '../lib/paginacion'
+import type { StockUbicacion, TipoMovimiento, Views } from '../types/database.types'
 
 /**
  * src/api/inventario.ts
@@ -124,10 +125,13 @@ export async function obtenerAlertasCaducidad(): Promise<
   InventarioResult<Views<'v_alertas_caducidad'>[]>
 > {
   try {
-    const { data, error } = await supabase
-      .from('v_alertas_caducidad')
-      .select('*')
-      .order('dias_restantes', { ascending: true })
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
+      supabase
+        .from('v_alertas_caducidad')
+        .select('*')
+        .order('dias_restantes', { ascending: true })
+        .range(desde, hasta),
+    )
 
     if (error) {
       console.error('[inventario] obtenerAlertasCaducidad:', error)
@@ -167,14 +171,17 @@ export async function obtenerAnalisisReposicion(): Promise<
   InventarioResult<Views<'v_analisis_reposicion'>[]>
 > {
   try {
-    const { data, error } = await supabase
-      .from('v_analisis_reposicion')
-      .select('*')
-      .in('estado_logistico', [
-        'REQUERIR COMPRA (PUNTO REORDEN)',
-        'ROTURA DE STOCK / CRÍTICO',
-      ])
-      .order('cantidad_actual', { ascending: true })
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
+      supabase
+        .from('v_analisis_reposicion')
+        .select('*')
+        .in('estado_logistico', [
+          'REQUERIR COMPRA (PUNTO REORDEN)',
+          'ROTURA DE STOCK / CRÍTICO',
+        ])
+        .order('cantidad_actual', { ascending: true })
+        .range(desde, hasta),
+    )
 
     if (error) {
       console.error('[inventario] obtenerAnalisisReposicion:', error)
@@ -212,11 +219,14 @@ export async function obtenerValorizacionInventario(): Promise<
   InventarioResult<Views<'v_valorizacion_inventario'>[]>
 > {
   try {
-    const { data, error } = await supabase
-      .from('v_valorizacion_inventario')
-      .select('*')
-      .order('area', { ascending: true })
-      .order('concepto', { ascending: true })
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
+      supabase
+        .from('v_valorizacion_inventario')
+        .select('*')
+        .order('area', { ascending: true })
+        .order('concepto', { ascending: true })
+        .range(desde, hasta),
+    )
 
     if (error) {
       console.error('[inventario] obtenerValorizacionInventario:', error)
@@ -235,6 +245,97 @@ export async function obtenerValorizacionInventario(): Promise<
     return fail(
       'ERROR_RED',
       'No fue posible conectar con el servidor para consultar la valorización.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 5. obtenerMovimientosRecientes
+// ------------------------------------------------------------------
+
+export interface MovimientoReciente {
+  id: string
+  tipo: TipoMovimiento
+  cantidad: number
+  fecha: string
+  producto: string
+  codigoBarras: string | null
+  ubicacionOrigen: string | null
+  ubicacionDestino: string | null
+  usuario: string
+}
+
+/**
+ * Forma cruda que devuelve PostgREST con los recursos embebidos, igual
+ * que FilaMovimientoCrudo en reportes.ts — se declara explícitamente en
+ * vez de usar 'any' porque los alias personalizados de las FKs de
+ * ubicacion_origen_id / ubicacion_destino_id no siempre se infieren con
+ * precisión desde los tipos genéricos de supabase-js.
+ */
+interface FilaMovimientoRecienteCruda {
+  id: string
+  tipo: TipoMovimiento
+  cantidad: number
+  created_at: string
+  producto: { concepto: string; codigo_barras: string } | null
+  origen: { nombre: string } | null
+  destino: { nombre: string } | null
+  usuario: { nombre_usuario: string } | null
+}
+
+/**
+ * Trae los movimientos más recientes de todo el sistema (entradas,
+ * traspasos y consumos/mermas mezclados, sin filtrar por tipo), en
+ * orden cronológico descendente. Es la fuente inicial del historial en
+ * vivo del Dashboard: DashboardScreen la vuelve a invocar cada vez que
+ * la suscripción postgres_changes sobre 'movimientos' recibe un INSERT,
+ * para mantener el listado sincronizado con la base de datos en tiempo
+ * real.
+ */
+export async function obtenerMovimientosRecientes(
+  limite = 15,
+): Promise<InventarioResult<MovimientoReciente[]>> {
+  try {
+    const { data, error } = await supabase
+      .from('movimientos')
+      .select(
+        `id, tipo, cantidad, created_at,
+         producto:productos(concepto, codigo_barras),
+         origen:ubicaciones!movimientos_ubicacion_origen_id_fkey(nombre),
+         destino:ubicaciones!movimientos_ubicacion_destino_id_fkey(nombre),
+         usuario:usuarios(nombre_usuario)`,
+      )
+      .order('created_at', { ascending: false })
+      .limit(limite)
+
+    if (error) {
+      console.error('[inventario] obtenerMovimientosRecientes:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo consultar el historial reciente de movimientos. Intenta de nuevo.',
+      )
+    }
+
+    const filasCrudas = (data ?? []) as unknown as FilaMovimientoRecienteCruda[]
+
+    const filas: MovimientoReciente[] = filasCrudas.map((mov) => ({
+      id: mov.id,
+      tipo: mov.tipo,
+      cantidad: mov.cantidad,
+      fecha: mov.created_at,
+      producto: mov.producto?.concepto ?? 'Producto desconocido',
+      codigoBarras: mov.producto?.codigo_barras ?? null,
+      ubicacionOrigen: mov.origen?.nombre ?? null,
+      ubicacionDestino: mov.destino?.nombre ?? null,
+      usuario: mov.usuario?.nombre_usuario ?? 'Usuario desconocido',
+    }))
+
+    return ok(filas)
+  } catch (err) {
+    console.error('[inventario] obtenerMovimientosRecientes (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para consultar el historial de movimientos.',
     )
   }
 }

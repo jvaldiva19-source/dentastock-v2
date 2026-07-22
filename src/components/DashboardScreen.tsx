@@ -1,24 +1,28 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useApiResult } from '../hooks/useApiResult'
+import { supabase } from '../lib/supabase'
 import {
   obtenerAlertasCaducidad,
   obtenerAnalisisReposicion,
+  obtenerMovimientosRecientes,
   type InventarioApiError,
+  type MovimientoReciente,
 } from '../api/inventario'
 import {
   obtenerResumenAuditoria,
   type ResumenAuditoria,
   type ReportesApiError,
 } from '../api/reportes'
-import type { Views } from '../types/database.types'
+import type { TipoMovimiento, Views } from '../types/database.types'
 
 /**
  * src/components/DashboardScreen.tsx
  *
  * Pantalla operativa de inicio: KPIs de auditoría, semáforo de
- * caducidades (trazabilidad COFEPRIS) y análisis de reposición.
+ * caducidades (trazabilidad COFEPRIS), análisis de reposición e
+ * historial de movimientos en vivo.
  *
- * Las tres secciones se cargan en paralelo y de forma INDEPENDIENTE
+ * Las cuatro secciones se cargan en paralelo y de forma INDEPENDIENTE
  * entre sí — cada una con su propio useApiResult y su propio estado
  * de carga/error. Esto es deliberado: si la consulta de caducidades
  * falla (por ejemplo, un timeout puntual de red), el usuario debe
@@ -29,6 +33,23 @@ import type { Views } from '../types/database.types'
  * es un único entregable de auditoría — aquí, en cambio, cada sección
  * es una unidad de información independiente para quien usa el
  * Dashboard en el día a día.
+ *
+ * Tiempo real: una única suscripción de Supabase Realtime
+ * (postgres_changes) escucha INSERTs en la tabla 'movimientos' — toda
+ * entrada, traspaso o consumo pasa por ahí, así que un solo canal basta
+ * para saber cuándo cualquiera de las cuatro secciones quedó
+ * desactualizada. Cada evento sube `refreshKey`, lo que hace que las
+ * cuatro llamadas a useApiResult (todas con [refreshKey] en sus deps)
+ * vuelvan a consultar sus vistas / tablas. useApiResult mantiene el
+ * dato anterior visible mientras la nueva consulta está en vuelo (ver
+ * su comentario en src/hooks/useApiResult.ts), así que el refresco no
+ * parpadea aunque ocurra muy seguido.
+ *
+ * Requisito de infraestructura: la replicación de Supabase Realtime
+ * debe estar habilitada para la tabla 'movimientos' (Database →
+ * Replication en el dashboard de Supabase, o
+ * `ALTER PUBLICATION supabase_realtime ADD TABLE movimientos;`). Sin
+ * eso, el canal se suscribe sin error pero nunca recibe eventos.
  */
 
 // ------------------------------------------------------------------
@@ -47,9 +68,19 @@ const formatoFecha = new Intl.DateTimeFormat('es-MX', {
   year: 'numeric',
 })
 
+const formatoHora = new Intl.DateTimeFormat('es-MX', {
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
 function formatearFecha(fechaIso: string | null): string {
   if (!fechaIso) return '—'
   return formatoFecha.format(new Date(fechaIso))
+}
+
+function formatearFechaHora(fechaIso: string): string {
+  const fecha = new Date(fechaIso)
+  return `${formatoFecha.format(fecha)}, ${formatoHora.format(fecha)}`
 }
 
 function describirDiasRestantes(dias: number | null): string {
@@ -120,19 +151,59 @@ const ESTILO_LOGISTICO_DEFECTO = {
 }
 
 // ------------------------------------------------------------------
+// Clasificación visual del historial de movimientos en vivo
+// ------------------------------------------------------------------
+
+const ESTILO_TIPO_MOVIMIENTO: Record<TipoMovimiento, { texto: string; etiqueta: string }> = {
+  ENTRADA_PROVEEDOR: { texto: 'text-status-ok', etiqueta: 'Entrada' },
+  TRASPASO_SALIDA: { texto: 'text-status-reorden', etiqueta: 'Traspaso (salida)' },
+  TRASPASO_ENTRADA: { texto: 'text-status-reorden', etiqueta: 'Traspaso (entrada)' },
+  CONSUMO: { texto: 'text-text-primary', etiqueta: 'Consumo' },
+  MERMA_CADUCIDAD: { texto: 'text-status-critico', etiqueta: 'Merma' },
+  AJUSTE_POSITIVO: { texto: 'text-status-ok', etiqueta: 'Ajuste (+)' },
+  AJUSTE_NEGATIVO: { texto: 'text-status-critico', etiqueta: 'Ajuste (-)' },
+  DEVOLUCION_PROVEEDOR: { texto: 'text-status-critico', etiqueta: 'Devolución' },
+}
+
+// ------------------------------------------------------------------
 // Componente principal
 // ------------------------------------------------------------------
 
 export function DashboardScreen() {
-  const resumen = useApiResult(() => obtenerResumenAuditoria(), [])
-  const caducidad = useApiResult(() => obtenerAlertasCaducidad(), [])
-  const reposicion = useApiResult(() => obtenerAnalisisReposicion(), [])
+  // Sube en cada evento realtime recibido — está en las deps de las
+  // cuatro llamadas de abajo para forzar su refetch cuando cambia.
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [enVivo, setEnVivo] = useState(false)
+
+  const resumen = useApiResult(() => obtenerResumenAuditoria(), [refreshKey])
+  const caducidad = useApiResult(() => obtenerAlertasCaducidad(), [refreshKey])
+  const reposicion = useApiResult(() => obtenerAnalisisReposicion(), [refreshKey])
+  const movimientosRecientes = useApiResult(
+    () => obtenerMovimientosRecientes(15),
+    [refreshKey],
+  )
+
+  useEffect(() => {
+    const canal = supabase
+      .channel('dashboard-movimientos')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'movimientos' },
+        () => setRefreshKey((k) => k + 1),
+      )
+      .subscribe((estado) => setEnVivo(estado === 'SUBSCRIBED'))
+
+    return () => {
+      supabase.removeChannel(canal)
+    }
+  }, [])
 
   return (
     <div className="space-y-8">
       <SeccionKpis estado={resumen} />
       <SeccionCaducidad estado={caducidad} />
       <SeccionReposicion estado={reposicion} />
+      <SeccionMovimientosRecientes estado={movimientosRecientes} enVivo={enVivo} />
     </div>
   )
 }
@@ -382,23 +453,118 @@ function SeccionReposicion({ estado }: PropsSeccionReposicion) {
 }
 
 // ------------------------------------------------------------------
+// Sección 4 — Historial de movimientos en vivo
+// ------------------------------------------------------------------
+
+interface PropsSeccionMovimientosRecientes {
+  estado:
+    | { fase: 'cargando' }
+    | { fase: 'error'; error: InventarioApiError; recargar: () => void }
+    | { fase: 'listo'; data: MovimientoReciente[]; recargar: () => void }
+  enVivo: boolean
+}
+
+function SeccionMovimientosRecientes({ estado, enVivo }: PropsSeccionMovimientosRecientes) {
+  return (
+    <PanelSeccion
+      titulo="Historial de movimientos en vivo"
+      subtitulo="Entradas, traspasos, consumos y mermas más recientes de todo el sistema, actualizado en tiempo real."
+      indicador={<IndicadorEnVivo activo={enVivo} />}
+    >
+      {estado.fase === 'cargando' && <CargandoTabla columnas={5} />}
+
+      {estado.fase === 'error' && (
+        <BannerError mensaje={estado.error.message} onReintentar={estado.recargar} />
+      )}
+
+      {estado.fase === 'listo' && estado.data.length === 0 && (
+        <EstadoVacio mensaje="Todavía no se ha registrado ningún movimiento." />
+      )}
+
+      {estado.fase === 'listo' && estado.data.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs uppercase tracking-wide text-text-muted">
+                <th className="px-3 py-2 font-medium">Tipo</th>
+                <th className="px-3 py-2 font-medium">Producto</th>
+                <th className="px-3 py-2 font-medium">Cantidad</th>
+                <th className="px-3 py-2 font-medium">Ubicación</th>
+                <th className="px-3 py-2 font-medium">Usuario</th>
+                <th className="px-3 py-2 font-medium">Fecha</th>
+              </tr>
+            </thead>
+            <tbody>
+              {estado.data.map((mov) => {
+                const estilo = ESTILO_TIPO_MOVIMIENTO[mov.tipo]
+                const ubicacion =
+                  mov.ubicacionOrigen && mov.ubicacionDestino
+                    ? `${mov.ubicacionOrigen} → ${mov.ubicacionDestino}`
+                    : (mov.ubicacionDestino ?? mov.ubicacionOrigen ?? '—')
+
+                return (
+                  <tr key={mov.id} className="border-b border-border last:border-0">
+                    <td className={`px-3 py-2.5 font-medium ${estilo.texto}`}>{estilo.etiqueta}</td>
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-text-primary">{mov.producto}</p>
+                      {mov.codigoBarras && (
+                        <p className="text-xs text-text-muted">{mov.codigoBarras}</p>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-text-primary">{mov.cantidad}</td>
+                    <td className="px-3 py-2.5 text-text-muted">{ubicacion}</td>
+                    <td className="px-3 py-2.5 text-text-muted">{mov.usuario}</td>
+                    <td className="px-3 py-2.5 text-text-muted">{formatearFechaHora(mov.fecha)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </PanelSeccion>
+  )
+}
+
+function IndicadorEnVivo({ activo }: { activo: boolean }) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs font-medium text-text-muted">
+      <span className="relative flex h-2 w-2">
+        {activo && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-ok opacity-75" />
+        )}
+        <span
+          className={`relative inline-flex h-2 w-2 rounded-full ${activo ? 'bg-status-ok' : 'bg-text-muted'}`}
+        />
+      </span>
+      {activo ? 'En vivo' : 'Conectando...'}
+    </span>
+  )
+}
+
+// ------------------------------------------------------------------
 // Bloques de presentación compartidos por las secciones
 // ------------------------------------------------------------------
 
 function PanelSeccion({
   titulo,
   subtitulo,
+  indicador,
   children,
 }: {
   titulo: string
   subtitulo: string
+  indicador?: ReactNode
   children: ReactNode
 }) {
   return (
     <section className="rounded-lg border border-border bg-canvas-card p-5">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-text-primary">{titulo}</h2>
-        <p className="mt-1 text-sm text-text-muted">{subtitulo}</p>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-base font-semibold text-text-primary">{titulo}</h2>
+          <p className="mt-1 text-sm text-text-muted">{subtitulo}</p>
+        </div>
+        {indicador}
       </div>
       {children}
     </section>

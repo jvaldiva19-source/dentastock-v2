@@ -9,7 +9,8 @@
       "PowerShell(npm install *)",
       "PowerShell(Test-Path \"node_modules\\\\@supabase\\\\supabase-js\"; npx tsc --noEmit -p tsconfig.app.json 2>&1 | Out-String -Width 500; Write-Output \"EXIT:$LASTEXITCODE\")",
       "PowerShell(npm audit *)",
-      "PowerShell(npx tsc -b --noEmit 2>&1 | Out-String -Width 500; Write-Output \"EXIT:$LASTEXITCODE\")"
+      "PowerShell(npx tsc -b --noEmit 2>&1 | Out-String -Width 500; Write-Output \"EXIT:$LASTEXITCODE\")",
+      "Bash(npm run *)"
     ]
   }
 }

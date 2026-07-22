@@ -3,6 +3,7 @@ import { useApiResult } from '../hooks/useApiResult'
 import { obtenerProductos, obtenerProveedores, obtenerUbicaciones, type ProductoConCategoria } from '../api/catalogo'
 import { getPerfilActual } from '../api/auth'
 import { registrarEntradaProveedor, registrarTraspaso, registrarConsumo } from '../api/movimientos'
+import { ComboboxProducto } from './common/ComboboxProducto'
 import type { Proveedor, Ubicacion } from '../types/database.types'
 
 type SubSeccion = 'entrada' | 'traspaso' | 'consumo'
@@ -232,10 +233,13 @@ function FormularioEntrada({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1">Insumo / Producto</label>
-          <select required value={productoId} onChange={(e) => setProductoId(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-3 py-2 text-sm focus:border-accent focus:outline-none">
-            <option value="">Selecciona un material...</option>
-            {productos.map((p) => <option key={p.id} value={p.id}>{p.concepto} ({p.codigo_barras})</option>)}
-          </select>
+          <ComboboxProducto
+            productos={productos}
+            value={productoId}
+            onChange={setProductoId}
+            required
+            placeholder="Busca un material por nombre o código..."
+          />
         </div>
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1">Proveedor Autorizado</label>
@@ -364,10 +368,13 @@ function FormularioTraspaso({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="sm:col-span-3">
           <label className="block text-xs font-medium text-text-muted mb-1">Seleccionar Material a Mover</label>
-          <select required value={productoId} onChange={(e) => setProductoId(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-3 py-2 text-sm focus:border-accent focus:outline-none">
-            <option value="">Elige un insumo...</option>
-            {productos.map((p) => <option key={p.id} value={p.id}>{p.concepto}</option>)}
-          </select>
+          <ComboboxProducto
+            productos={productos}
+            value={productoId}
+            onChange={setProductoId}
+            required
+            placeholder="Busca un insumo por nombre o código..."
+          />
         </div>
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1">Cantidad</label>
@@ -445,10 +452,13 @@ function FormularioConsumo({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="sm:col-span-2">
           <label className="block text-xs font-medium text-text-muted mb-1">Insumo utilizado</label>
-          <select required value={productoId} onChange={(e) => setProductoId(e.target.value)} className="w-full rounded-md border border-border bg-canvas px-3 py-2 text-sm focus:border-accent focus:outline-none">
-            <option value="">Selecciona el material consumido...</option>
-            {productos.map((p) => <option key={p.id} value={p.id}>{p.concepto}</option>)}
-          </select>
+          <ComboboxProducto
+            productos={productos}
+            value={productoId}
+            onChange={setProductoId}
+            required
+            placeholder="Busca el material consumido..."
+          />
         </div>
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1">Uso Operativo</label>

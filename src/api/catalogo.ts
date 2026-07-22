@@ -1,6 +1,7 @@
 import type { PostgrestError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
+import { obtenerTodasLasFilas } from '../lib/paginacion'
 import type {
   Producto,
   Categoria,
@@ -105,15 +106,24 @@ export interface ProductoConCategoria extends Producto {
  * la UI decide cómo distinguirlos visualmente, esta función no filtra)
  * con su categoría correspondiente embebida en una sola consulta,
  * en lugar de hacer N+1 consultas separadas a 'categorias'.
+ *
+ * Paginada con obtenerTodasLasFilas() porque PostgREST trunca a 1000
+ * filas por defecto — con 1,778 productos en catálogo, un .select() sin
+ * paginar dejaba fuera (en silencio) a todo lo que ordena después de la
+ * fila 1000 según 'concepto', rompiendo tanto el orden alfabético
+ * completo como cualquier total calculado sobre este arreglo.
  */
 export async function obtenerProductos(): Promise<
   CatalogoResult<ProductoConCategoria[]>
 > {
   try {
-    const { data, error } = await supabase
-      .from('productos')
-      .select('*, categoria:categorias(id, nombre, requiere_cadena_frio)')
-      .order('concepto', { ascending: true })
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
+      supabase
+        .from('productos')
+        .select('*, categoria:categorias(id, nombre, requiere_cadena_frio)')
+        .order('concepto', { ascending: true })
+        .range(desde, hasta),
+    )
 
     if (error) {
       console.error('[catalogo] obtenerProductos:', error)

@@ -25,6 +25,15 @@ import type { Result } from '../lib/result'
  * dependencias de useEffect: cuando cambia, se vuelve a ejecutar
  * fetcher(). Para llamadas sin parámetros (como las del Dashboard)
  * se deja vacío y solo se ejecuta al montar.
+ *
+ * Si ya existe un `data` cargado ('listo') cuando `deps` cambia, ese
+ * dato se mantiene visible mientras la nueva consulta está en vuelo en
+ * lugar de volver a 'cargando' — evita que una pantalla con datos ya
+ * visibles parpadee de vuelta al esqueleto de carga en cada refetch.
+ * Esto es lo que hace viable, por ejemplo, que el Dashboard se
+ * refresque en cada evento de una suscripción realtime sin destellar
+ * en cada movimiento. El esqueleto de 'cargando' solo se ve en la
+ * carga inicial (cuando todavía no hay datos) o tras un error previo.
  */
 
 export type EstadoApiResult<T, TError> =
@@ -43,7 +52,7 @@ export function useApiResult<T, TError>(
 
   useEffect(() => {
     let cancelado = false
-    setEstadoInterno({ fase: 'cargando' })
+    setEstadoInterno((previo) => (previo.fase === 'listo' ? previo : { fase: 'cargando' }))
 
     fetcher().then((resultado) => {
       if (cancelado) return

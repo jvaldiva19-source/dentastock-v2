@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
+import { obtenerTodasLasFilas } from '../lib/paginacion'
 import type { TipoMovimiento } from '../types/database.types'
 
 /**
@@ -364,6 +365,15 @@ export interface ResumenAuditoria {
  * (por ejemplo, sin poder confirmar el valor total del inventario) es
  * peor que no tener resumen — podría leerse como "$0 en riesgo" en
  * lugar de "dato no disponible".
+ *
+ * Las tres consultas de vistas se paginan con obtenerTodasLasFilas()
+ * porque PostgREST trunca a 1000 filas por defecto: con 1,778 productos
+ * en catálogo, sumar valorTotalInventario sobre una respuesta truncada
+ * subestimaría el valor real del almacén en vez de reflejar el total
+ * completo. El conteo de productosRes no necesita paginarse porque usa
+ * { count: 'exact', head: true } — Postgres calcula el conteo exacto
+ * en el servidor sin devolver filas, así que nunca queda sujeto al
+ * límite de 1000 que sí aplica a las respuestas con datos.
  */
 export async function obtenerResumenAuditoria(): Promise<
   ReportesResult<ResumenAuditoria>
@@ -375,9 +385,24 @@ export async function obtenerResumenAuditoria(): Promise<
           .from('productos')
           .select('id', { count: 'exact', head: true })
           .eq('activo', true),
-        supabase.from('v_valorizacion_inventario').select('valor_total'),
-        supabase.from('v_alertas_caducidad').select('dias_restantes'),
-        supabase.from('v_analisis_reposicion').select('estado_logistico'),
+        obtenerTodasLasFilas((desde, hasta) =>
+          supabase
+            .from('v_valorizacion_inventario')
+            .select('valor_total')
+            .range(desde, hasta),
+        ),
+        obtenerTodasLasFilas((desde, hasta) =>
+          supabase
+            .from('v_alertas_caducidad')
+            .select('dias_restantes')
+            .range(desde, hasta),
+        ),
+        obtenerTodasLasFilas((desde, hasta) =>
+          supabase
+            .from('v_analisis_reposicion')
+            .select('estado_logistico')
+            .range(desde, hasta),
+        ),
       ])
 
     if (

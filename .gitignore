@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Exportaciones de inventario (datos pesados/sensibles, no se versionan)
+*.csv
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -389,18 +389,23 @@ export async function obtenerResumenAuditoria(): Promise<
           supabase
             .from('v_valorizacion_inventario')
             .select('valor_total')
+            .order('area', { ascending: true })
+            .order('codigo_barras', { ascending: true })
             .range(desde, hasta),
         ),
         obtenerTodasLasFilas((desde, hasta) =>
           supabase
             .from('v_alertas_caducidad')
             .select('dias_restantes')
+            .order('id', { ascending: true })
             .range(desde, hasta),
         ),
         obtenerTodasLasFilas((desde, hasta) =>
           supabase
             .from('v_analisis_reposicion')
             .select('estado_logistico')
+            .order('producto_id', { ascending: true })
+            .order('codigo_ubicacion', { ascending: true })
             .range(desde, hasta),
         ),
       ])

@@ -7,7 +7,6 @@ import type {
   Categoria,
   Proveedor,
   Ubicacion,
-  Usuario,
   TablesInsert,
   TablesUpdate,
 } from '../types/database.types'
@@ -385,43 +384,7 @@ export async function obtenerUbicaciones(): Promise<CatalogoResult<Ubicacion[]>>
 }
 
 // ------------------------------------------------------------------
-// 7. obtenerUsuarios
-// ------------------------------------------------------------------
-
-/**
- * Trae los usuarios activos del sistema. Alimenta el filtro "Usuario"
- * de la pestaña Analítica del Dashboard (PanelAnalitica) — igual que
- * obtenerUbicaciones() y obtenerProveedores(), es un catálogo pequeño
- * de referencia, no una consulta transaccional.
- */
-export async function obtenerUsuarios(): Promise<CatalogoResult<Usuario[]>> {
-  try {
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('activo', true)
-      .order('nombre_completo', { ascending: true })
-
-    if (error) {
-      console.error('[catalogo] obtenerUsuarios:', error)
-      return fail(
-        'CONSULTA_FALLIDA',
-        'No se pudo consultar la lista de usuarios. Intenta de nuevo.',
-      )
-    }
-
-    return ok(data ?? [])
-  } catch (err) {
-    console.error('[catalogo] obtenerUsuarios (excepción):', err)
-    return fail(
-      'ERROR_RED',
-      'No fue posible conectar con el servidor para consultar usuarios.',
-    )
-  }
-}
-
-// ------------------------------------------------------------------
-// 8. actualizarCategoria
+// 7. actualizarCategoria
 // ------------------------------------------------------------------
 
 /**

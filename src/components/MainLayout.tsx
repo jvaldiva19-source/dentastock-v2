@@ -23,7 +23,7 @@ import type { RolUsuario } from '../types/database.types'
  * pieza como pendiente si no la tienes ya.
  */
 
-export type VistaPrincipal = 'dashboard' | 'catalogo' | 'movimientos' | 'reportes'
+export type VistaPrincipal = 'dashboard' | 'catalogo' | 'movimientos' | 'reportes' | 'usuarios'
 
 export interface UsuarioEnLayout {
   /** nombreCompleto si existe, o nombreUsuario como respaldo */
@@ -102,6 +102,17 @@ function IconoReportes({ className }: { className?: string }) {
   )
 }
 
+function IconoUsuarios({ className }: { className?: string }) {
+  return (
+    <svg {...trazoBase(className)}>
+      <circle cx="7.5" cy="6.5" r="2.5" />
+      <path d="M2.8 16.2c0-2.6 2.1-4.2 4.7-4.2s4.7 1.6 4.7 4.2" />
+      <circle cx="13.8" cy="7" r="2" />
+      <path d="M12.8 12.3c1.9.3 3.4 1.7 3.4 3.9" />
+    </svg>
+  )
+}
+
 function IconoSalir({ className }: { className?: string }) {
   return (
     <svg {...trazoBase(className)}>
@@ -164,6 +175,12 @@ const ITEMS_NAV: ItemNav[] = [
     id: 'reportes',
     etiqueta: 'Reportes de Auditoría',
     icono: IconoReportes,
+    soloAdministrador: true,
+  },
+  {
+    id: 'usuarios',
+    etiqueta: 'Gestión de Usuarios',
+    icono: IconoUsuarios,
     soloAdministrador: true,
   },
 ]

@@ -144,13 +144,13 @@ export function CatalogoScreen() {
         <button
           type="button"
           onClick={modo === 'crear' ? cerrar : abrirCrear}
-          className={`self-start rounded-md px-4 py-2 text-sm font-medium text-text-onink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
+          className={`self-start rounded-md px-5 py-2.5 text-sm font-semibold text-text-onink shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${
             modo === 'crear'
               ? 'bg-text-muted hover:opacity-80'
-              : 'bg-ink-900 hover:bg-ink-700'
+              : 'bg-accent hover:bg-accent-strong'
           }`}
         >
-          {modo === 'crear' ? 'Cancelar nuevo' : '+ Nuevo producto'}
+          {modo === 'crear' ? 'Cancelar nuevo' : '➕ Nuevo Insumo / Medicamento'}
         </button>
       </div>
 

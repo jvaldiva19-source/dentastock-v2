@@ -7,6 +7,7 @@ import { DashboardScreen } from './components/DashboardScreen'
 import { MovimientosScreen } from './components/MovimientosScreen'
 import { CatalogoScreen } from './components/CatalogoScreen'
 import { ReportesScreen } from './components/ReportesScreen'
+import { UsuariosScreen } from './components/UsuariosScreen'
 
 /**
  * src/App.tsx
@@ -52,7 +53,7 @@ type EstadoApp =
  * al dejar que el motor de PostgreSQL valide el stock además de la
  * lógica de la aplicación.
  */
-const VISTAS_SOLO_ADMINISTRADOR: VistaPrincipal[] = ['catalogo', 'reportes']
+const VISTAS_SOLO_ADMINISTRADOR: VistaPrincipal[] = ['catalogo', 'reportes', 'usuarios']
 
 export default function App() {
   const [estado, setEstado] = useState<EstadoApp>({ fase: 'verificando_sesion' })
@@ -257,6 +258,8 @@ function ContenidoVista({ vista }: { vista: VistaPrincipal }) {
       return <MovimientosScreen />
     case 'reportes':
       return <ReportesScreen />
+    case 'usuarios':
+      return <UsuariosScreen />
     default:
       return (
         <PanelMarcador

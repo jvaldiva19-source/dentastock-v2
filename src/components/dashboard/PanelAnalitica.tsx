@@ -13,7 +13,8 @@ import {
   LabelList,
 } from 'recharts'
 import { useApiResult } from '../../hooks/useApiResult'
-import { obtenerProductos, obtenerUbicaciones, obtenerUsuarios } from '../../api/catalogo'
+import { obtenerProductos, obtenerUbicaciones } from '../../api/catalogo'
+import { obtenerUsuarios } from '../../api/usuarios'
 import {
   obtenerFlujoMovimientos,
   obtenerConsumoPorAreas,
@@ -157,7 +158,7 @@ export function PanelAnalitica() {
             className="w-full rounded-md border border-border bg-canvas px-3 py-2 text-sm focus:border-accent focus:outline-none"
           >
             <option value="">Todos los usuarios</option>
-            {(usuariosRes.fase === 'listo' ? usuariosRes.data : []).map((u) => (
+            {(usuariosRes.fase === 'listo' ? usuariosRes.data.filter((u) => u.activo) : []).map((u) => (
               <option key={u.id} value={u.id}>
                 {u.nombre_completo ?? u.nombre_usuario}
               </option>

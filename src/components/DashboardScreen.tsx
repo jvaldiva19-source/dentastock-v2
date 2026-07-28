@@ -14,6 +14,8 @@ import {
   type ReportesApiError,
 } from '../api/reportes'
 import type { TipoMovimiento, Views } from '../types/database.types'
+import { Tabs } from './common/Tabs'
+import { PanelAnalitica } from './dashboard/PanelAnalitica'
 
 /**
  * src/components/DashboardScreen.tsx
@@ -201,9 +203,32 @@ export function DashboardScreen() {
   return (
     <div className="space-y-8">
       <SeccionKpis estado={resumen} />
-      <SeccionCaducidad estado={caducidad} />
-      <SeccionReposicion estado={reposicion} />
-      <SeccionMovimientosRecientes estado={movimientosRecientes} enVivo={enVivo} />
+      <Tabs
+        pestanas={[
+          {
+            id: 'caducidades',
+            etiqueta: 'Caducidades',
+            contenido: <SeccionCaducidad estado={caducidad} />,
+          },
+          {
+            id: 'stock',
+            etiqueta: 'Alertas de Stock',
+            contenido: <SeccionReposicion estado={reposicion} />,
+          },
+          {
+            id: 'movimientos',
+            etiqueta: 'Movimientos Recientes',
+            contenido: (
+              <SeccionMovimientosRecientes estado={movimientosRecientes} enVivo={enVivo} />
+            ),
+          },
+          {
+            id: 'analitica',
+            etiqueta: 'Analítica',
+            contenido: <PanelAnalitica />,
+          },
+        ]}
+      />
     </div>
   )
 }

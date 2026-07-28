@@ -34,6 +34,7 @@ export interface Database {
           nombre: string
           descripcion: string | null
           requiere_cadena_frio: boolean
+          grupo_financiero: Database['public']['Enums']['grupo_financiero_categoria']
           created_at: string
         }
         Insert: {
@@ -41,6 +42,7 @@ export interface Database {
           nombre: string
           descripcion?: string | null
           requiere_cadena_frio?: boolean
+          grupo_financiero?: Database['public']['Enums']['grupo_financiero_categoria']
           created_at?: string
         }
         Update: {
@@ -48,6 +50,7 @@ export interface Database {
           nombre?: string
           descripcion?: string | null
           requiere_cadena_frio?: boolean
+          grupo_financiero?: Database['public']['Enums']['grupo_financiero_categoria']
           created_at?: string
         }
         Relationships: []
@@ -250,6 +253,7 @@ export interface Database {
           fecha_caducidad: string | null
           costo_unitario: number | null
           cantidad_inicial: number
+          cantidad_actual: number
           estado: Database['public']['Enums']['estado_lote']
           observaciones: string | null
           registrado_por: string | null
@@ -265,6 +269,7 @@ export interface Database {
           fecha_caducidad?: string | null
           costo_unitario?: number | null
           cantidad_inicial: number
+          cantidad_actual?: number
           estado?: Database['public']['Enums']['estado_lote']
           observaciones?: string | null
           registrado_por?: string | null
@@ -280,6 +285,7 @@ export interface Database {
           fecha_caducidad?: string | null
           costo_unitario?: number | null
           cantidad_inicial?: number
+          cantidad_actual?: number
           estado?: Database['public']['Enums']['estado_lote']
           observaciones?: string | null
           registrado_por?: string | null
@@ -533,6 +539,7 @@ export interface Database {
         | 'DEVOLUCION_PROVEEDOR'
       estado_lote: 'ACTIVO' | 'AGOTADO' | 'VENCIDO' | 'CUARENTENA'
       rol_usuario: 'ADMINISTRADOR' | 'PERSONAL_CLINICA'
+      grupo_financiero_categoria: 'MATERIAL_DENTAL' | 'MATERIAL_LIMPIEZA'
       unidad_medida:
         | 'PIEZA'
         | 'CAJA'

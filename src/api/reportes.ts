@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
 import { obtenerTodasLasFilas } from '../lib/paginacion'
+import { obtenerUbicaciones } from './catalogo'
 import type { TipoMovimiento } from '../types/database.types'
 
 /**
@@ -242,6 +243,31 @@ export async function obtenerKardexProducto(
 }
 
 // ------------------------------------------------------------------
+// Filtros compartidos de la pestaña Analítica del Dashboard
+// ------------------------------------------------------------------
+
+/**
+ * Forma común de filtro para las tres consultas que alimentan
+ * PanelAnalitica (flujo de movimientos, consumo por áreas y métricas
+ * por personal). productoId / ubicacionId / usuarioId son opcionales:
+ * ausentes u undefined significa "todos" — el mismo criterio que ya
+ * usa ComboboxProducto (value === '' equivale a sin selección).
+ *
+ * ubicacionId filtra movimientos donde el área participa como ORIGEN
+ * O como DESTINO (un traspaso hacia una farmacia y un consumo hecho
+ * desde ella son ambos "actividad de esa ubicación"), a diferencia de
+ * obtenerConsumoPorAreas() en su forma original, que solo miraba el
+ * origen porque su alcance era estrictamente salidas.
+ */
+export interface FiltroAnalitico {
+  fechaInicio: string
+  fechaFin: string
+  productoId?: string
+  ubicacionId?: string
+  usuarioId?: string
+}
+
+// ------------------------------------------------------------------
 // 2. obtenerConsumoPorAreas
 // ------------------------------------------------------------------
 
@@ -271,10 +297,16 @@ interface FilaConsumoCruda {
  * El arreglo final se ordena por valorTotal descendente, para que el
  * área/tipo de mayor impacto económico aparezca primero — el criterio
  * más útil para una revisión mensual de costos.
+ *
+ * `filtros` es opcional y aditivo: productoId/usuarioId/ubicacionId
+ * (sobre el origen) acotan más la misma consulta — se agregó para que
+ * PanelAnalitica pueda reutilizar esta función bajo sus filtros
+ * globales sin duplicar la lógica de agregación.
  */
 export async function obtenerConsumoPorAreas(
   fechaInicio: string,
   fechaFin: string,
+  filtros?: Pick<FiltroAnalitico, 'productoId' | 'usuarioId' | 'ubicacionId'>,
 ): Promise<ReportesResult<FilaConsumoPorArea[]>> {
   if (!fechaInicio || !fechaFin) {
     return fail(
@@ -284,7 +316,7 @@ export async function obtenerConsumoPorAreas(
   }
 
   try {
-    const { data, error } = await supabase
+    let consulta = supabase
       .from('movimientos')
       .select(
         `tipo, cantidad, costo_snapshot,
@@ -293,6 +325,18 @@ export async function obtenerConsumoPorAreas(
       .in('tipo', ['CONSUMO', 'MERMA_CADUCIDAD'])
       .gte('created_at', normalizarInicioDeDia(fechaInicio))
       .lte('created_at', normalizarFinDeDia(fechaFin))
+
+    if (filtros?.productoId) {
+      consulta = consulta.eq('producto_id', filtros.productoId)
+    }
+    if (filtros?.usuarioId) {
+      consulta = consulta.eq('usuario_id', filtros.usuarioId)
+    }
+    if (filtros?.ubicacionId) {
+      consulta = consulta.eq('ubicacion_origen_id', filtros.ubicacionId)
+    }
+
+    const { data, error } = await consulta
 
     if (error) {
       console.error('[reportes] obtenerConsumoPorAreas:', error)
@@ -339,7 +383,377 @@ export async function obtenerConsumoPorAreas(
 }
 
 // ------------------------------------------------------------------
-// 3. obtenerResumenAuditoria
+// 3. obtenerFlujoFinancieroPorArea
+// ------------------------------------------------------------------
+
+export interface FilaFlujoFinancieroArea {
+  ubicacionId: string
+  area: string
+  anio: number
+  /** 1-12 */
+  mes: number
+  entrada: number
+  salida: number
+}
+
+interface FilaFlujoFinancieroCruda {
+  tipo: TipoMovimiento
+  cantidad: number
+  costo_snapshot: number | null
+  ubicacion_origen_id: string | null
+  ubicacion_destino_id: string | null
+  created_at: string
+}
+
+const TIPOS_ENTRADA_AREA: TipoMovimiento[] = [
+  'TRASPASO_ENTRADA',
+  'AJUSTE_POSITIVO',
+  'ENTRADA_PROVEEDOR',
+]
+const TIPOS_SALIDA_AREA: TipoMovimiento[] = [
+  'CONSUMO',
+  'MERMA_CADUCIDAD',
+  'AJUSTE_NEGATIVO',
+  'DEVOLUCION_PROVEEDOR',
+  'TRASPASO_SALIDA',
+]
+
+/**
+ * Alimenta la tabla dinámica CONCEPTO/ÁREA · MES · ENTRADA · SALIDA
+ * del Reporte de Finanzas (src/services/excelService.ts). Solo
+ * considera 'ubicaciones' con es_destino_final = true — el campo ya
+ * existente en el esquema que distingue un área clínica de consumo
+ * (Endodoncia, Ortodoncia, etc.) de Almacén Central o una farmacia
+ * intermedia, exactamente el mismo universo de "áreas" que aparece en
+ * la plantilla de referencia.
+ *
+ * ENTRADA de un área = valor de lo que llegó a ella (traspasos
+ * recibidos o ajustes positivos registrados ahí). SALIDA = valor de lo
+ * que salió de ella (consumo clínico, merma, ajuste negativo,
+ * devolución a proveedor o traspaso de regreso a otra ubicación). Esto
+ * siempre cuadra en el sistema completo: el traspaso que es "salida"
+ * para el área origen es "entrada" para el área destino.
+ *
+ * Devuelve solo las combinaciones (área, año, mes) con movimientos
+ * reales — excelService.ts es responsable de rellenar con ceros los
+ * meses/áreas sin actividad dentro del rango, para que la tabla final
+ * tenga una fila por cada combinación exigida por el reporte
+ * institucional, no solo las que tuvieron movimiento.
+ */
+export async function obtenerFlujoFinancieroPorArea(
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<ReportesResult<FilaFlujoFinancieroArea[]>> {
+  if (!fechaInicio || !fechaFin) {
+    return fail(
+      'DATOS_INVALIDOS',
+      'Debes especificar el rango de fechas (inicio y fin) a consultar.',
+    )
+  }
+
+  try {
+    const ubicacionesRes = await obtenerUbicaciones()
+    if (!ubicacionesRes.success) {
+      console.error('[reportes] obtenerFlujoFinancieroPorArea (ubicaciones):', ubicacionesRes.error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo consultar las áreas activas para el reporte de finanzas.',
+      )
+    }
+
+    const areasDestinoFinal = new Map(
+      ubicacionesRes.data
+        .filter((u) => u.es_destino_final)
+        .map((u) => [u.id, u.nombre] as const),
+    )
+
+    if (areasDestinoFinal.size === 0) {
+      return ok([])
+    }
+
+    const { data, error } = await supabase
+      .from('movimientos')
+      .select('tipo, cantidad, costo_snapshot, ubicacion_origen_id, ubicacion_destino_id, created_at')
+      .in('tipo', [...TIPOS_ENTRADA_AREA, ...TIPOS_SALIDA_AREA])
+      .gte('created_at', normalizarInicioDeDia(fechaInicio))
+      .lte('created_at', normalizarFinDeDia(fechaFin))
+
+    if (error) {
+      console.error('[reportes] obtenerFlujoFinancieroPorArea:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo generar el flujo financiero por área. Intenta de nuevo.',
+      )
+    }
+
+    const filasCrudas = (data ?? []) as unknown as FilaFlujoFinancieroCruda[]
+    const acumulador = new Map<string, FilaFlujoFinancieroArea>()
+
+    function acumular(ubicacionId: string, anio: number, mes: number, entrada: number, salida: number) {
+      const area = areasDestinoFinal.get(ubicacionId)
+      if (!area) return // La ubicación no es un área de destino final (ej. Almacén Central)
+
+      const llave = `${ubicacionId}|${anio}|${mes}`
+      const existente = acumulador.get(llave) ?? { ubicacionId, area, anio, mes, entrada: 0, salida: 0 }
+      existente.entrada += entrada
+      existente.salida += salida
+      acumulador.set(llave, existente)
+    }
+
+    for (const fila of filasCrudas) {
+      const fecha = new Date(fila.created_at)
+      const anio = fecha.getFullYear()
+      const mes = fecha.getMonth() + 1
+      const valor = fila.cantidad * (fila.costo_snapshot ?? 0)
+
+      if (TIPOS_ENTRADA_AREA.includes(fila.tipo) && fila.ubicacion_destino_id) {
+        acumular(fila.ubicacion_destino_id, anio, mes, valor, 0)
+      }
+      if (TIPOS_SALIDA_AREA.includes(fila.tipo) && fila.ubicacion_origen_id) {
+        acumular(fila.ubicacion_origen_id, anio, mes, 0, valor)
+      }
+    }
+
+    const resultado = Array.from(acumulador.values()).sort((a, b) =>
+      a.anio !== b.anio ? a.anio - b.anio : a.mes !== b.mes ? a.mes - b.mes : a.area.localeCompare(b.area),
+    )
+
+    return ok(resultado)
+  } catch (err) {
+    console.error('[reportes] obtenerFlujoFinancieroPorArea (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para generar el flujo financiero por área.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 4. obtenerFlujoMovimientos
+// ------------------------------------------------------------------
+
+export interface FilaFlujoMovimiento {
+  /** 'YYYY-MM-DD' si el rango es corto, 'YYYY-MM' si excede ~60 días */
+  periodo: string
+  entradas: number
+  salidas: number
+}
+
+interface FilaFlujoCruda {
+  tipo: TipoMovimiento
+  cantidad: number
+  producto_id: string
+  usuario_id: string
+  ubicacion_origen_id: string | null
+  ubicacion_destino_id: string | null
+  created_at: string
+}
+
+const TIPOS_ENTRADA_SISTEMA: TipoMovimiento[] = ['ENTRADA_PROVEEDOR', 'AJUSTE_POSITIVO']
+const TIPOS_SALIDA_SISTEMA: TipoMovimiento[] = [
+  'CONSUMO',
+  'MERMA_CADUCIDAD',
+  'AJUSTE_NEGATIVO',
+  'DEVOLUCION_PROVEEDOR',
+]
+
+/** Milisegundos en un día, usado para decidir el tamaño del bucket de agregación. */
+const UN_DIA_MS = 24 * 60 * 60 * 1000
+const UMBRAL_BUCKET_MENSUAL_DIAS = 60
+
+/**
+ * Compara entradas contra salidas del sistema día a día (o mes a mes,
+ * si el rango elegido excede 60 días — de lo contrario un año completo
+ * dibujaría 365 puntos ilegibles en la gráfica). Usa exactamente el
+ * mismo criterio de qué tipo de movimiento "entra" o "sale" del total
+ * del sistema que ya usa calcularSignoMovimiento() para el kardex más
+ * abajo — los traspasos quedan fuera a propósito porque no cambian el
+ * total, solo reubican inventario entre áreas.
+ */
+export async function obtenerFlujoMovimientos(
+  filtros: FiltroAnalitico,
+): Promise<ReportesResult<FilaFlujoMovimiento[]>> {
+  if (!filtros.fechaInicio || !filtros.fechaFin) {
+    return fail(
+      'DATOS_INVALIDOS',
+      'Debes especificar el rango de fechas (inicio y fin) a consultar.',
+    )
+  }
+
+  try {
+    let consulta = supabase
+      .from('movimientos')
+      .select('tipo, cantidad, producto_id, usuario_id, ubicacion_origen_id, ubicacion_destino_id, created_at')
+      .in('tipo', [...TIPOS_ENTRADA_SISTEMA, ...TIPOS_SALIDA_SISTEMA])
+      .gte('created_at', normalizarInicioDeDia(filtros.fechaInicio))
+      .lte('created_at', normalizarFinDeDia(filtros.fechaFin))
+
+    if (filtros.productoId) {
+      consulta = consulta.eq('producto_id', filtros.productoId)
+    }
+    if (filtros.usuarioId) {
+      consulta = consulta.eq('usuario_id', filtros.usuarioId)
+    }
+    if (filtros.ubicacionId) {
+      consulta = consulta.or(
+        `ubicacion_origen_id.eq.${filtros.ubicacionId},ubicacion_destino_id.eq.${filtros.ubicacionId}`,
+      )
+    }
+
+    const { data, error } = await consulta
+
+    if (error) {
+      console.error('[reportes] obtenerFlujoMovimientos:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo generar el flujo de movimientos. Intenta de nuevo.',
+      )
+    }
+
+    const filasCrudas = (data ?? []) as unknown as FilaFlujoCruda[]
+
+    const inicio = new Date(normalizarInicioDeDia(filtros.fechaInicio))
+    const fin = new Date(normalizarFinDeDia(filtros.fechaFin))
+    const diasDeRango = Math.max(1, (fin.getTime() - inicio.getTime()) / UN_DIA_MS)
+    const bucketMensual = diasDeRango > UMBRAL_BUCKET_MENSUAL_DIAS
+
+    const acumulador = new Map<string, FilaFlujoMovimiento>()
+
+    for (const fila of filasCrudas) {
+      const periodo = bucketMensual
+        ? fila.created_at.slice(0, 7)
+        : fila.created_at.slice(0, 10)
+
+      const existente = acumulador.get(periodo) ?? {
+        periodo,
+        entradas: 0,
+        salidas: 0,
+      }
+
+      if (TIPOS_ENTRADA_SISTEMA.includes(fila.tipo)) {
+        existente.entradas += fila.cantidad
+      } else if (TIPOS_SALIDA_SISTEMA.includes(fila.tipo)) {
+        existente.salidas += fila.cantidad
+      }
+
+      acumulador.set(periodo, existente)
+    }
+
+    const resultado = Array.from(acumulador.values()).sort((a, b) =>
+      a.periodo.localeCompare(b.periodo),
+    )
+
+    return ok(resultado)
+  } catch (err) {
+    console.error('[reportes] obtenerFlujoMovimientos (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para generar el flujo de movimientos.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 5. obtenerMetricasPorUsuario
+// ------------------------------------------------------------------
+
+export interface FilaMetricaUsuario {
+  usuario: string
+  totalMovimientos: number
+  valorTotal: number
+}
+
+interface FilaMetricaUsuarioCruda {
+  cantidad: number
+  costo_snapshot: number | null
+  usuario: { nombre_usuario: string } | null
+}
+
+/**
+ * Desglose operacional de movimientos por usuario/operador dentro del
+ * rango elegido — cuenta TODOS los tipos de movimiento (no solo
+ * entradas/salidas del sistema), porque el propósito aquí es medir
+ * actividad operativa de cada persona, no el impacto neto en el
+ * inventario total.
+ *
+ * Se ordena por totalMovimientos descendente para que el operador con
+ * mayor volumen de actividad aparezca primero en la gráfica.
+ */
+export async function obtenerMetricasPorUsuario(
+  filtros: FiltroAnalitico,
+): Promise<ReportesResult<FilaMetricaUsuario[]>> {
+  if (!filtros.fechaInicio || !filtros.fechaFin) {
+    return fail(
+      'DATOS_INVALIDOS',
+      'Debes especificar el rango de fechas (inicio y fin) a consultar.',
+    )
+  }
+
+  try {
+    let consulta = supabase
+      .from('movimientos')
+      .select('cantidad, costo_snapshot, usuario:usuarios(nombre_usuario), usuario_id, producto_id, ubicacion_origen_id, ubicacion_destino_id')
+      .gte('created_at', normalizarInicioDeDia(filtros.fechaInicio))
+      .lte('created_at', normalizarFinDeDia(filtros.fechaFin))
+
+    if (filtros.productoId) {
+      consulta = consulta.eq('producto_id', filtros.productoId)
+    }
+    if (filtros.usuarioId) {
+      consulta = consulta.eq('usuario_id', filtros.usuarioId)
+    }
+    if (filtros.ubicacionId) {
+      consulta = consulta.or(
+        `ubicacion_origen_id.eq.${filtros.ubicacionId},ubicacion_destino_id.eq.${filtros.ubicacionId}`,
+      )
+    }
+
+    const { data, error } = await consulta
+
+    if (error) {
+      console.error('[reportes] obtenerMetricasPorUsuario:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo generar las métricas por usuario. Intenta de nuevo.',
+      )
+    }
+
+    const filasCrudas = (data ?? []) as unknown as FilaMetricaUsuarioCruda[]
+    const acumulador = new Map<string, FilaMetricaUsuario>()
+
+    for (const fila of filasCrudas) {
+      const usuario = fila.usuario?.nombre_usuario ?? 'Usuario desconocido'
+      const valorFila = fila.cantidad * (fila.costo_snapshot ?? 0)
+
+      const existente = acumulador.get(usuario)
+      if (existente) {
+        existente.totalMovimientos += 1
+        existente.valorTotal += valorFila
+      } else {
+        acumulador.set(usuario, {
+          usuario,
+          totalMovimientos: 1,
+          valorTotal: valorFila,
+        })
+      }
+    }
+
+    const resultado = Array.from(acumulador.values()).sort(
+      (a, b) => b.totalMovimientos - a.totalMovimientos,
+    )
+
+    return ok(resultado)
+  } catch (err) {
+    console.error('[reportes] obtenerMetricasPorUsuario (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para generar las métricas por usuario.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 6. obtenerResumenAuditoria
 // ------------------------------------------------------------------
 
 export interface ResumenAuditoria {

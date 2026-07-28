@@ -207,9 +207,27 @@ export async function obtenerAnalisisReposicion(): Promise<
 
 /**
  * Consulta v_valorizacion_inventario: el valor financiero del stock
- * actual (cantidad × precio_con_iva) desglosado por ubicación. Es la
- * fuente directa para las conciliaciones contables mensuales y para
- * el Reporte de Contraloría descrito en docs/arquitectura.md.
+ * actual, calculado lote por lote (cantidad_actual × costo_unitario de
+ * CADA lote del producto, sumado entre lotes) y con precio_sin_iva
+ * como respaldo solo si el producto no tiene ningún lote activo con
+ * costo registrado. Desglosado por ubicación. Es la fuente directa
+ * para las conciliaciones contables mensuales y para el Reporte de
+ * Contraloría.
+ *
+ * Corregido el 2026-07-22 en dos pasos (ver supabase/migrations/
+ * 20260722120000_add_lotes_cantidad_actual_y_registros_ds1583_ds1585.sql
+ * y 20260722120100_fix_valorizacion_inventario_por_lote.sql): la vista
+ * valoraba antes al precio de venta con IVA (precio_con_iva), y un
+ * primer intento de corrección promedió el costo por producto en vez
+ * de respetar que un mismo producto puede tener lotes con costo y
+ * unidad de medida distintos (caja completa vs. pieza suelta).
+ *
+ * cantidad_actual y precio_unitario en esta vista quedan como una
+ * cifra combinada entre lotes (útil para mostrar en una sola fila por
+ * producto), no como un dato preciso por unidad de medida cuando un
+ * producto mezcla lotes en distintas presentaciones — valor_total sí
+ * es exacto. Para el detalle por lote, consultar la tabla lotes
+ * directamente.
  *
  * Se ordena por área y luego por concepto para que el resultado sea
  * directamente exportable a Excel sin necesidad de reordenar en el

@@ -1,9 +1,22 @@
 import { useState, type FormEvent } from 'react'
 import { useApiResult } from '../hooks/useApiResult'
 import { obtenerProductos, type ProductoConCategoria } from '../api/catalogo'
-import { obtenerKardexProducto, obtenerConsumoPorAreas, type FilaKardex, type FilaConsumoPorArea } from '../api/reportes'
-
-type TipoReporte = 'kardex' | 'consumos'
+import {
+  obtenerKardexProducto,
+  obtenerConsumoPorAreas,
+  type FilaKardex,
+  type FilaConsumoPorArea,
+  type ReportesApiError,
+} from '../api/reportes'
+import {
+  generarReporteContraloria,
+  generarReporteFinanzas,
+  exportarKardexAExcel,
+  exportarConsumoPorAreasAExcel,
+} from '../services/excelService'
+import { Tabs } from './common/Tabs'
+import { DatePicker } from './common/DatePicker'
+import { DateRangePicker } from './common/DateRangePicker'
 
 const formatoMoneda = new Intl.NumberFormat('es-MX', {
   style: 'currency',
@@ -19,7 +32,6 @@ const formatoFecha = new Intl.DateTimeFormat('es-MX', {
 })
 
 export function ReportesScreen() {
-  const [reporteActivo, setReporteActivo] = useState<TipoReporte>('kardex')
   const productosRes = useApiResult(() => obtenerProductos(), [])
 
   return (
@@ -30,48 +42,37 @@ export function ReportesScreen() {
         <p className="mt-0.5 text-sm text-text-muted">Consolidación financiera, rastreabilidad cronológica y control presupuestal de insumos.</p>
       </div>
 
-      {/* Selector de Pestañas Analíticas */}
-      <div className="flex gap-4 border-b border-border pb-px">
-        <button
-          type="button"
-          onClick={() => setReporteActivo('kardex')}
-          className={`border-b-2 px-1 pb-3 text-sm font-medium transition-colors focus:outline-none ${
-            reporteActivo === 'kardex'
-              ? 'border-accent text-accent font-semibold'
-              : 'border-transparent text-text-muted hover:text-text-primary'
-          }`}
-        >
-          📈 Kardex Global Histórico
-        </button>
-        <button
-          type="button"
-          onClick={() => setReporteActivo('consumos')}
-          className={`border-b-2 px-1 pb-3 text-sm font-medium transition-colors focus:outline-none ${
-            reporteActivo === 'consumos'
-              ? 'border-transparent text-text-muted hover:text-text-primary'
-              : 'border-transparent text-text-muted hover:text-text-primary' /* Condicional dinámico interno */
-          }`}
-          style={{
-            borderColor: reporteActivo === 'consumos' ? 'var(--color-accent)' : 'transparent',
-            color: reporteActivo === 'consumos' ? 'var(--color-accent)' : 'inherit',
-            fontWeight: reporteActivo === 'consumos' ? '600' : 'inherit'
-          }}
-        >
-          📊 Consumo por Áreas Clínicas
-        </button>
-      </div>
-
       {/* Contenedor del Reporte Activo */}
       <div className="rounded-lg border border-border bg-canvas-card p-6 shadow-sm">
         {productosRes.fase === 'cargando' ? (
           <div className="py-8 text-center text-sm text-text-muted animate-pulse">Cargando catálogos analíticos...</div>
         ) : (
-          <>
-            {reporteActivo === 'kardex' && (
-              <PanelKardex productos={productosRes.fase === 'listo' ? productosRes.data : []} />
-            )}
-            {reporteActivo === 'consumos' && <PanelConsumoPorAreas />}
-          </>
+          <Tabs
+            pestanas={[
+              {
+                id: 'kardex',
+                etiqueta: '📈 Kardex Global Histórico',
+                contenido: (
+                  <PanelKardex productos={productosRes.fase === 'listo' ? productosRes.data : []} />
+                ),
+              },
+              {
+                id: 'consumos',
+                etiqueta: '📊 Consumo por Áreas Clínicas',
+                contenido: <PanelConsumoPorAreas />,
+              },
+              {
+                id: 'contraloria',
+                etiqueta: '🏛️ Contraloría',
+                contenido: <PanelContraloria />,
+              },
+              {
+                id: 'finanzas',
+                etiqueta: '💰 Finanzas',
+                contenido: <PanelFinanzas />,
+              },
+            ]}
+          />
         )}
       </div>
     </div>
@@ -83,13 +84,15 @@ export function ReportesScreen() {
 // =================================────────────────=================
 function PanelKardex({ productos }: { productos: ProductoConCategoria[] }) {
   const [productoId, setProductoId] = useState('')
-  const [fechaInicio, setFechaInicio] = useState('')
-  const [fechaFin, setFechaFin] = useState('')
+  const [fechaInicio, setFechaInicio] = useState<string | null>(null)
+  const [fechaFin, setFechaFin] = useState<string | null>(null)
   const [ejecutarTrigger, setEjecutarTrigger] = useState(0)
+  const [exportando, setExportando] = useState(false)
+  const [errorExportar, setErrorExportar] = useState<string | null>(null)
 
   // Consulta perezosa diferida: solo se dispara cuando el usuario hace clic explícito en "Consultar"
-  const kardexData = useApiResult<FilaKardex[], any>(
-    () => (productoId ? obtenerKardexProducto(productoId, fechaInicio || undefined, fechaFin || undefined) : Promise.resolve({ success: true, data: [] as FilaKardex[] })),
+  const kardexData = useApiResult<FilaKardex[], ReportesApiError>(
+    () => (productoId ? obtenerKardexProducto(productoId, fechaInicio ?? undefined, fechaFin ?? undefined) : Promise.resolve({ success: true, data: [] as FilaKardex[] })),
     [ejecutarTrigger]
   )
 
@@ -99,9 +102,16 @@ function PanelKardex({ productos }: { productos: ProductoConCategoria[] }) {
     setEjecutarTrigger((prev) => prev + 1)
   }
 
-  function exportarAExcel() {
-    console.log('Marcador de posición: Exportando Kardex a través de SheetJS...', { productoId, fechaInicio, fechaFin })
-    alert('Marcador de posición: Archivo Excel generado en memoria (Lógica de SheetJS pendiente de enlazar en la siguiente fase).')
+  async function exportarAExcel() {
+    if (kardexData.fase !== 'listo') return
+    setErrorExportar(null)
+    setExportando(true)
+    const nombreProducto = productos.find((p) => p.id === productoId)?.concepto ?? 'Producto'
+    const resultado = await exportarKardexAExcel(kardexData.data, nombreProducto)
+    setExportando(false)
+    if (!resultado.success) {
+      setErrorExportar(resultado.error.message)
+    }
   }
 
   return (
@@ -116,11 +126,11 @@ function PanelKardex({ productos }: { productos: ProductoConCategoria[] }) {
         </div>
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1">Desde (Opcional)</label>
-          <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full rounded-md border border-border bg-canvas-card px-3 py-2 text-sm focus:border-accent focus:outline-none" />
+          <DatePicker value={fechaInicio} onChange={setFechaInicio} placeholder="Sin límite inferior" />
         </div>
         <div>
           <label className="block text-xs font-medium text-text-muted mb-1">Hasta (Opcional)</label>
-          <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="w-full rounded-md border border-border bg-canvas-card px-3 py-2 text-sm focus:border-accent focus:outline-none" />
+          <DatePicker value={fechaFin} onChange={setFechaFin} placeholder="Sin límite superior" maxHoy />
         </div>
         <div className="sm:col-span-4 flex justify-end">
           <button type="submit" className="rounded-md bg-ink-900 px-5 py-2 text-sm font-medium text-text-onink hover:bg-ink-700 transition-colors">
@@ -130,18 +140,26 @@ function PanelKardex({ productos }: { productos: ProductoConCategoria[] }) {
       </form>
 
       {kardexData.fase === 'cargando' && <div className="py-8 text-center text-sm text-text-muted animate-pulse">Calculando saldos acumulados...</div>}
-      
+
       {kardexData.fase === 'error' && (
         <div className="rounded-md bg-status-critico-soft p-4 text-sm text-status-critico">{kardexData.error.message}</div>
       )}
 
       {kardexData.fase === 'listo' && ejecutarTrigger > 0 && (
         <div className="space-y-4">
+          {errorExportar && (
+            <div className="rounded-md bg-status-critico-soft p-3 text-sm text-status-critico">{errorExportar}</div>
+          )}
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Libro Auxiliar de Movimientos</h3>
             {kardexData.data.length > 0 && (
-              <button type="button" onClick={exportarAExcel} className="rounded-md border border-accent bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-strong hover:bg-accent hover:text-text-onink transition-colors">
-                📥 Exportar Kardex a Excel
+              <button
+                type="button"
+                onClick={exportarAExcel}
+                disabled={exportando}
+                className="rounded-md border border-accent bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-strong hover:bg-accent hover:text-text-onink transition-colors disabled:opacity-60"
+              >
+                {exportando ? 'Generando…' : '📥 Exportar Kardex a Excel'}
               </button>
             )}
           </div>
@@ -199,11 +217,13 @@ function PanelKardex({ productos }: { productos: ProductoConCategoria[] }) {
 // 📊 SUB-PANEL: CONSUMO AGRUPADO POR ÁREAS CLINICAS
 // =================================────────────────=================
 function PanelConsumoPorAreas() {
-  const [fechaInicio, setFechaInicio] = useState('')
-  const [fechaFin, setFechaFin] = useState('')
+  const [fechaInicio, setFechaInicio] = useState<string | null>(null)
+  const [fechaFin, setFechaFin] = useState<string | null>(null)
   const [ejecutarTrigger, setEjecutarTrigger] = useState(0)
+  const [exportando, setExportando] = useState(false)
+  const [errorExportar, setErrorExportar] = useState<string | null>(null)
 
-  const consumosData = useApiResult<FilaConsumoPorArea[], any>(
+  const consumosData = useApiResult<FilaConsumoPorArea[], ReportesApiError>(
     () => (fechaInicio && fechaFin ? obtenerConsumoPorAreas(fechaInicio, fechaFin) : Promise.resolve({ success: true, data: [] as FilaConsumoPorArea[] })),
     [ejecutarTrigger]
   )
@@ -214,23 +234,36 @@ function PanelConsumoPorAreas() {
     setEjecutarTrigger((prev) => prev + 1)
   }
 
-  function exportarAExcel() {
-    console.log('Marcador de posición: Exportando Consumos por Área vía SheetJS...', { fechaInicio, fechaFin })
-    alert('Marcador de posición: Archivo Excel generado en memoria (Lógica de SheetJS pendiente de enlazar en la siguiente fase).')
+  async function exportarAExcel() {
+    if (consumosData.fase !== 'listo' || !fechaInicio || !fechaFin) return
+    setErrorExportar(null)
+    setExportando(true)
+    const resultado = await exportarConsumoPorAreasAExcel(consumosData.data, fechaInicio, fechaFin)
+    setExportando(false)
+    if (!resultado.success) {
+      setErrorExportar(resultado.error.message)
+    }
   }
 
   return (
     <div className="space-y-6">
       <form onSubmit={manejarConsulta} className="grid grid-cols-1 gap-4 sm:grid-cols-3 items-end bg-canvas p-4 rounded-lg border border-border">
-        <div>
-          <label className="block text-xs font-medium text-text-muted mb-1">Fecha de Inicio (Obligatoria)</label>
-          <input type="date" required value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="w-full rounded-md border border-border bg-canvas-card px-3 py-2 text-sm focus:border-accent focus:outline-none" />
+        <div className="sm:col-span-2">
+          <label className="block text-xs font-medium text-text-muted mb-1">Rango de fechas (Obligatorio)</label>
+          <DateRangePicker
+            fechaInicio={fechaInicio}
+            fechaFin={fechaFin}
+            onChange={(rango) => {
+              setFechaInicio(rango.fechaInicio)
+              setFechaFin(rango.fechaFin)
+            }}
+          />
         </div>
-        <div>
-          <label className="block text-xs font-medium text-text-muted mb-1">Fecha de Término (Obligatoria)</label>
-          <input type="date" required value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="w-full rounded-md border border-border bg-canvas-card px-3 py-2 text-sm focus:border-accent focus:outline-none" />
-        </div>
-        <button type="submit" className="rounded-md bg-ink-900 px-5 py-2 text-sm font-medium text-text-onink hover:bg-ink-700 transition-colors h-10">
+        <button
+          type="submit"
+          disabled={!fechaInicio || !fechaFin}
+          className="rounded-md bg-ink-900 px-5 py-2 text-sm font-medium text-text-onink hover:bg-ink-700 transition-colors h-10 disabled:opacity-50"
+        >
           📈 Consolidar Costos
         </button>
       </form>
@@ -243,11 +276,19 @@ function PanelConsumoPorAreas() {
 
       {consumosData.fase === 'listo' && ejecutarTrigger > 0 && (
         <div className="space-y-4">
+          {errorExportar && (
+            <div className="rounded-md bg-status-critico-soft p-3 text-sm text-status-critico">{errorExportar}</div>
+          )}
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Centro de Costos por Distribución</h3>
             {consumosData.data.length > 0 && (
-              <button type="button" onClick={exportarAExcel} className="rounded-md border border-accent bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-strong hover:bg-accent hover:text-text-onink transition-colors">
-                📥 Exportar Costos a Excel
+              <button
+                type="button"
+                onClick={exportarAExcel}
+                disabled={exportando}
+                className="rounded-md border border-accent bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent-strong hover:bg-accent hover:text-text-onink transition-colors disabled:opacity-60"
+              >
+                {exportando ? 'Generando…' : '📥 Exportar Costos a Excel'}
               </button>
             )}
           </div>
@@ -286,6 +327,126 @@ function PanelConsumoPorAreas() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// =================================────────────────=================
+// 🏛️ SUB-PANEL: REPORTE DE CONTRALORÍA
+// =================================────────────────=================
+function PanelContraloria() {
+  const [generando, setGenerando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [exito, setExito] = useState(false)
+
+  async function generar() {
+    setGenerando(true)
+    setError(null)
+    setExito(false)
+    const resultado = await generarReporteContraloria()
+    setGenerando(false)
+    if (!resultado.success) {
+      setError(resultado.error.message)
+      return
+    }
+    setExito(true)
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg border border-border bg-canvas p-5">
+        <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Reporte de Contraloría</h3>
+        <p className="mt-2 text-sm text-text-muted">
+          Genera el reporte institucional de existencia física activa: solo incluye productos con
+          existencia final mayor a cero, con COSTO, COSTO CON IVA y TOTAL FINAL calculados por
+          fórmula dentro del propio archivo Excel, exactamente con la estructura de columnas
+          exigida por Contraloría (N°, Artículo, Descripción, Costo, Costo con IVA, Existencia
+          Final, Total Final).
+        </p>
+      </div>
+
+      {error && <div className="rounded-md bg-status-critico-soft p-3 text-sm text-status-critico">{error}</div>}
+      {exito && (
+        <div className="rounded-md bg-status-ok-soft p-3 text-sm text-status-ok">
+          Reporte generado y descargado correctamente.
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={generar}
+        disabled={generando}
+        className="rounded-md bg-ink-900 px-5 py-2.5 text-sm font-medium text-text-onink hover:bg-ink-700 transition-colors disabled:opacity-60"
+      >
+        {generando ? 'Generando…' : '📥 Generar Reporte de Contraloría'}
+      </button>
+    </div>
+  )
+}
+
+// =================================────────────────=================
+// 💰 SUB-PANEL: REPORTE DE FINANZAS
+// =================================────────────────=================
+function PanelFinanzas() {
+  const [fechaInicio, setFechaInicio] = useState<string | null>(null)
+  const [fechaFin, setFechaFin] = useState<string | null>(null)
+  const [generando, setGenerando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [exito, setExito] = useState(false)
+
+  async function generar() {
+    if (!fechaInicio || !fechaFin) return
+    setGenerando(true)
+    setError(null)
+    setExito(false)
+    const resultado = await generarReporteFinanzas(fechaInicio, fechaFin)
+    setGenerando(false)
+    if (!resultado.success) {
+      setError(resultado.error.message)
+      return
+    }
+    setExito(true)
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg border border-border bg-canvas p-5">
+        <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Reporte de Finanzas</h3>
+        <p className="mt-2 text-sm text-text-muted">
+          Genera el reporte institucional Concepto/Área · Mes · Entrada · Salida · Existencia Final,
+          con el bloque de Existencia Inicial (valorización actual del inventario, desglosada en
+          Material Dental / Mat. Limpieza), saldo acumulado por fórmula, totales y firmas. Elige el
+          rango de meses a incluir.
+        </p>
+      </div>
+
+      <div className="max-w-sm">
+        <label className="block text-xs font-medium text-text-muted mb-1">Rango de fechas del reporte</label>
+        <DateRangePicker
+          fechaInicio={fechaInicio}
+          fechaFin={fechaFin}
+          onChange={(rango) => {
+            setFechaInicio(rango.fechaInicio)
+            setFechaFin(rango.fechaFin)
+          }}
+        />
+      </div>
+
+      {error && <div className="rounded-md bg-status-critico-soft p-3 text-sm text-status-critico">{error}</div>}
+      {exito && (
+        <div className="rounded-md bg-status-ok-soft p-3 text-sm text-status-ok">
+          Reporte generado y descargado correctamente.
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={generar}
+        disabled={generando || !fechaInicio || !fechaFin}
+        className="rounded-md bg-ink-900 px-5 py-2.5 text-sm font-medium text-text-onink hover:bg-ink-700 transition-colors disabled:opacity-60"
+      >
+        {generando ? 'Generando…' : '📥 Generar Reporte de Finanzas'}
+      </button>
     </div>
   )
 }

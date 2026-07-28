@@ -7,6 +7,7 @@ import type {
   Categoria,
   Proveedor,
   Ubicacion,
+  Usuario,
   TablesInsert,
   TablesUpdate,
 } from '../types/database.types'
@@ -94,7 +95,7 @@ function traducirErrorPostgrest(error: PostgrestError): CatalogoApiError {
 // ------------------------------------------------------------------
 
 export interface ProductoConCategoria extends Producto {
-  categoria: Pick<Categoria, 'id' | 'nombre' | 'requiere_cadena_frio'> | null
+  categoria: Pick<Categoria, 'id' | 'nombre' | 'requiere_cadena_frio' | 'grupo_financiero'> | null
 }
 
 // ------------------------------------------------------------------
@@ -120,7 +121,7 @@ export async function obtenerProductos(): Promise<
     const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
       supabase
         .from('productos')
-        .select('*, categoria:categorias(id, nombre, requiere_cadena_frio)')
+        .select('*, categoria:categorias(id, nombre, requiere_cadena_frio, grupo_financiero)')
         .order('concepto', { ascending: true })
         .range(desde, hasta),
     )
@@ -379,6 +380,94 @@ export async function obtenerUbicaciones(): Promise<CatalogoResult<Ubicacion[]>>
     return fail(
       'ERROR_RED',
       'No fue posible conectar con el servidor para consultar ubicaciones.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 7. obtenerUsuarios
+// ------------------------------------------------------------------
+
+/**
+ * Trae los usuarios activos del sistema. Alimenta el filtro "Usuario"
+ * de la pestaña Analítica del Dashboard (PanelAnalitica) — igual que
+ * obtenerUbicaciones() y obtenerProveedores(), es un catálogo pequeño
+ * de referencia, no una consulta transaccional.
+ */
+export async function obtenerUsuarios(): Promise<CatalogoResult<Usuario[]>> {
+  try {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('activo', true)
+      .order('nombre_completo', { ascending: true })
+
+    if (error) {
+      console.error('[catalogo] obtenerUsuarios:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo consultar la lista de usuarios. Intenta de nuevo.',
+      )
+    }
+
+    return ok(data ?? [])
+  } catch (err) {
+    console.error('[catalogo] obtenerUsuarios (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para consultar usuarios.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 8. actualizarCategoria
+// ------------------------------------------------------------------
+
+/**
+ * Actualiza una categoría existente. Hoy solo se usa para capturar
+ * grupo_financiero (MATERIAL_DENTAL / MATERIAL_LIMPIEZA) desde la
+ * sección "Clasificación financiera" de CatalogoScreen — el Reporte de
+ * Finanzas necesita ese dato para desglosar la Existencia Inicial, y
+ * no existía ninguna vía para capturarlo antes de esta función.
+ */
+export async function actualizarCategoria(
+  id: string,
+  datos: TablesUpdate<'categorias'>,
+): Promise<CatalogoResult<Categoria>> {
+  if (!id || id.trim().length === 0) {
+    return fail('DATOS_INVALIDOS', 'Debes especificar la categoría a actualizar.')
+  }
+
+  try {
+    const { data: categoria, error } = await supabase
+      .from('categorias')
+      .update(datos)
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('[catalogo] actualizarCategoria:', error)
+      return fail(
+        'ERROR_DESCONOCIDO',
+        'Ocurrió un error al guardar la categoría. Intenta de nuevo.',
+      )
+    }
+
+    if (!categoria) {
+      return fail(
+        'PRODUCTO_NO_ENCONTRADO',
+        'No se encontró la categoría que intentas actualizar.',
+      )
+    }
+
+    return ok(categoria)
+  } catch (err) {
+    console.error('[catalogo] actualizarCategoria (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para actualizar la categoría.',
     )
   }
 }

@@ -5,6 +5,7 @@ import {
   obtenerCategorias,
   crearProducto,
   actualizarProducto,
+  actualizarCategoria,
   type ProductoConCategoria,
 } from '../api/catalogo'
 import {
@@ -152,6 +153,11 @@ export function CatalogoScreen() {
           {modo === 'crear' ? 'Cancelar nuevo' : '+ Nuevo producto'}
         </button>
       </div>
+
+      {/* ---- Clasificación financiera de categorías (para el Reporte de Finanzas) ---- */}
+      {categorias.fase === 'listo' && (
+        <SeccionClasificacionFinanciera categorias={categorias.data} onActualizado={categorias.recargar} />
+      )}
 
       {/* ---- Formulario de creación / edición ---- */}
       {modo !== null && (
@@ -318,6 +324,101 @@ function FilaCargando() {
           <div className="ml-auto h-4 w-12 animate-pulse rounded bg-canvas" />
         </div>
       ))}
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------
+// Clasificación financiera de categorías
+// ------------------------------------------------------------------
+
+/**
+ * El Reporte de Finanzas (src/services/excelService.ts) necesita saber
+ * si cada categoría cuenta como MATERIAL DENTAL o MAT. LIMPIEZA para
+ * desglosar el bloque de Existencia Inicial — dato que no existía en
+ * ninguna pantalla antes de esta sección. Colapsada por defecto porque
+ * es una tarea de configuración ocasional, no parte del flujo diario
+ * de captura de productos que domina esta pantalla.
+ */
+function SeccionClasificacionFinanciera({
+  categorias,
+  onActualizado,
+}: {
+  categorias: Categoria[]
+  onActualizado: () => void
+}) {
+  const [abierta, setAbierta] = useState(false)
+  const [guardandoId, setGuardandoId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function manejarCambio(id: string, grupo: Enums<'grupo_financiero_categoria'>) {
+    setGuardandoId(id)
+    setError(null)
+
+    const resultado = await actualizarCategoria(id, { grupo_financiero: grupo })
+
+    setGuardandoId(null)
+
+    if (!resultado.success) {
+      setError(resultado.error.message)
+      return
+    }
+
+    onActualizado()
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-canvas-card">
+      <button
+        type="button"
+        onClick={() => setAbierta((a) => !a)}
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <div>
+          <p className="text-sm font-semibold text-text-primary">Clasificación financiera de categorías</p>
+          <p className="mt-0.5 text-xs text-text-muted">
+            Usada por el Reporte de Finanzas para desglosar la Existencia Inicial en Material
+            Dental / Mat. Limpieza.
+          </p>
+        </div>
+        <span className="flex-shrink-0 text-xs font-medium text-text-muted">
+          {abierta ? 'Ocultar ▲' : 'Mostrar ▼'}
+        </span>
+      </button>
+
+      {abierta && (
+        <div className="border-t border-border p-4">
+          {error && (
+            <div className="mb-3 rounded-md bg-status-critico-soft p-2 text-xs text-status-critico">{error}</div>
+          )}
+
+          {categorias.length === 0 ? (
+            <p className="text-sm text-text-muted">No hay categorías registradas todavía.</p>
+          ) : (
+            <div className="space-y-2">
+              {categorias.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                >
+                  <span className="text-sm text-text-primary">{c.nombre}</span>
+                  <select
+                    value={c.grupo_financiero}
+                    disabled={guardandoId === c.id}
+                    onChange={(e) =>
+                      manejarCambio(c.id, e.target.value as Enums<'grupo_financiero_categoria'>)
+                    }
+                    className="rounded-md border border-border bg-canvas px-2 py-1 text-xs focus:border-accent focus:outline-none disabled:opacity-60"
+                  >
+                    <option value="MATERIAL_DENTAL">Material Dental</option>
+                    <option value="MATERIAL_LIMPIEZA">Mat. Limpieza</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -16,15 +16,25 @@ import type { Usuario, TablesInsert } from '../types/database.types'
  * NOTA DE AUTENTICACIÓN — LEER ANTES DE TOCAR crearUsuario(): esta
  * versión inserta directamente en la tabla pública 'usuarios' sin
  * crear ninguna cuenta real de Supabase Auth. auth_id es NOT NULL en
- * el esquema (referencia esperada a auth.users.id), así que aquí se
- * genera un UUID aleatorio como marcador de posición — la persona
- * queda dada de alta en el directorio de personal, pero NO podrá
- * iniciar sesión hasta que se conecte con Supabase Auth (ej. un flujo
- * de invitación por correo que cree el auth.users real y actualice
- * este mismo registro con su id verdadero). Es una limitación conocida
- * y aceptada explícitamente para esta fase — no la resuelvas por tu
+ * el esquema, así que aquí se genera un UUID aleatorio con
+ * crypto.randomUUID() como marcador de posición — la persona queda
+ * dada de alta en el directorio de personal, pero NO podrá iniciar
+ * sesión hasta que se conecte con Supabase Auth (ej. un flujo de
+ * invitación por correo que cree el auth.users real y actualice este
+ * mismo registro con su id verdadero). Es una limitación conocida y
+ * aceptada explícitamente para esta fase — no la resuelvas por tu
  * cuenta sin confirmarlo, ya que cambiar esto implica decidir el flujo
  * de invitación/alta de credenciales.
+ *
+ * Si 'usuarios.auth_id' tiene (o tuvo) una foreign key hacia
+ * auth.users(id), un UUID generado en el cliente que no corresponde a
+ * ninguna cuenta real de Auth SIEMPRE viola esa FK (23503) — por
+ * diseño, no por un bug del INSERT. La migración
+ * supabase/migrations/20260729120000_permitir_auth_id_independiente_en_usuarios.sql
+ * elimina esa FK específicamente para permitir esta alta sin cuenta de
+ * Auth todavía; traducirErrorPostgrest() de abajo además reconoce 23503
+ * como defensa en profundidad, por si esa migración no se ha aplicado
+ * todavía contra el proyecto real.
  */
 
 // ------------------------------------------------------------------
@@ -62,7 +72,12 @@ function ok<T>(data: T): UsuariosResult<T> {
 /**
  * Traduce SQLSTATE de Postgres a códigos de dominio — mismo criterio
  * que traducirErrorPostgrest() en catalogo.ts: .code es el SQLSTATE
- * estándar, no depende de la redacción del mensaje.
+ * estándar, no depende de la redacción del mensaje. El mensaje por
+ * defecto (rama final) SÍ incluye el código crudo — a diferencia del
+ * resto de la app, aquí conviene que quien reporte el problema pueda
+ * copiar el SQLSTATE exacto en vez de un texto genérico, precisamente
+ * porque esta función ya falló una vez por un caso (23503) que no
+ * estaba cubierto.
  */
 function traducirErrorPostgrest(error: PostgrestError): UsuariosApiError {
   // 23505 = unique_violation (nombre_usuario ya existe)
@@ -84,9 +99,41 @@ function traducirErrorPostgrest(error: PostgrestError): UsuariosApiError {
     )
   }
 
+  // 23503 = foreign_key_violation. El caso esperado aquí es auth_id
+  // contra auth.users(id): el UUID generado en el cliente por
+  // crypto.randomUUID() no corresponde a ninguna cuenta real de
+  // Supabase Auth todavía. La migración
+  // 20260729120000_permitir_auth_id_independiente_en_usuarios.sql
+  // elimina esa FK — si este mensaje aparece, esa migración no se ha
+  // aplicado contra el proyecto (o hay otra FK violada, ver 'details').
+  if (error.code === '23503') {
+    return new UsuariosApiError(
+      'ERROR_DESCONOCIDO',
+      'No se pudo crear el usuario por una restricción de llave foránea (probablemente auth_id contra auth.users). Aplica la migración 20260729120000_permitir_auth_id_independiente_en_usuarios.sql contra tu proyecto de Supabase.',
+    )
+  }
+
+  // 23502 = not_null_violation — algún campo obligatorio llegó vacío
+  // sin que validarDatosUsuario() lo haya detectado antes.
+  if (error.code === '23502') {
+    return new UsuariosApiError(
+      'DATOS_INVALIDOS',
+      'Falta un dato obligatorio para crear el usuario. Revisa el formulario e intenta de nuevo.',
+    )
+  }
+
+  // 42501 = insufficient_privilege — la política RLS de INSERT en
+  // 'usuarios' rechazó al usuario actual (ej. no es ADMINISTRADOR).
+  if (error.code === '42501') {
+    return new UsuariosApiError(
+      'ERROR_DESCONOCIDO',
+      'Tu usuario no tiene permisos para crear nuevos usuarios en el sistema.',
+    )
+  }
+
   return new UsuariosApiError(
     'ERROR_DESCONOCIDO',
-    'Ocurrió un error al guardar el usuario. Intenta de nuevo o contacta al administrador.',
+    `Ocurrió un error al guardar el usuario (código ${error.code ?? 'desconocido'}: ${error.message}). Intenta de nuevo o contacta al administrador.`,
   )
 }
 
@@ -193,7 +240,12 @@ export async function crearUsuario(
       .single()
 
     if (error || !usuario) {
-      console.error('[usuarios] crearUsuario:', error)
+      console.error('[usuarios] crearUsuario:', {
+        code: error?.code,
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+      })
       return failResult(traducirErrorPostgrest(error!))
     }
 

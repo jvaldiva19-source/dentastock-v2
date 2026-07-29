@@ -1,13 +1,14 @@
-import { useState, type FormEvent } from 'react'
+import { useState, useMemo, type FormEvent } from 'react'
 import { useApiResult } from '../hooks/useApiResult'
 import {
   obtenerProductos,
   obtenerCategorias,
+  obtenerUbicaciones,
   crearProducto,
   actualizarProducto,
-  actualizarCategoria,
   type ProductoConCategoria,
 } from '../api/catalogo'
+import { obtenerStockPorUbicacion } from '../api/inventario'
 import {
   BannerExito,
   BannerErrorFormulario,
@@ -77,9 +78,28 @@ export function CatalogoScreen() {
   const [modo, setModo] = useState<ModoFormulario | null>(null)
   const [productoEditando, setProductoEditando] = useState<ProductoConCategoria | null>(null)
   const [busqueda, setBusqueda] = useState('')
+  const [ubicacionId, setUbicacionId] = useState('')
 
   const productos = useApiResult(() => obtenerProductos(), [refreshKey])
   const categorias = useApiResult(() => obtenerCategorias(), [])
+  const ubicaciones = useApiResult(() => obtenerUbicaciones(), [])
+  const stock = useApiResult(
+    () => obtenerStockPorUbicacion(ubicacionId || undefined),
+    [ubicacionId, refreshKey],
+  )
+
+  // Suma cantidad_actual por producto — con ubicación seleccionada hay
+  // una sola fila por producto; sin selección (todas las ubicaciones)
+  // puede haber varias filas del mismo producto que deben sumarse.
+  const stockPorProducto = useMemo(() => {
+    const mapa = new Map<string, number>()
+    if (stock.fase === 'listo') {
+      for (const fila of stock.data) {
+        mapa.set(fila.producto_id, (mapa.get(fila.producto_id) ?? 0) + fila.cantidad_actual)
+      }
+    }
+    return mapa
+  }, [stock])
 
   function abrirCrear() {
     setProductoEditando(null)
@@ -154,11 +174,6 @@ export function CatalogoScreen() {
         </button>
       </div>
 
-      {/* ---- Clasificación financiera de categorías (para el Reporte de Finanzas) ---- */}
-      {categorias.fase === 'listo' && (
-        <SeccionClasificacionFinanciera categorias={categorias.data} onActualizado={categorias.recargar} />
-      )}
-
       {/* ---- Formulario de creación / edición ---- */}
       {modo !== null && (
         <FormularioProducto
@@ -171,14 +186,29 @@ export function CatalogoScreen() {
         />
       )}
 
-      {/* ---- Buscador ---- */}
-      <input
-        type="search"
-        value={busqueda}
-        onChange={(e) => setBusqueda(e.target.value)}
-        placeholder="Buscar por nombre, código o categoría…"
-        className="w-full max-w-md rounded-md border border-border bg-canvas-card px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      />
+      {/* ---- Buscador + filtro de ubicación (para Stock actual) ---- */}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <input
+          type="search"
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder="Buscar por nombre, código o categoría…"
+          className="w-full max-w-md rounded-md border border-border bg-canvas-card px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        />
+        <select
+          value={ubicacionId}
+          onChange={(e) => setUbicacionId(e.target.value)}
+          className="w-full max-w-xs rounded-md border border-border bg-canvas-card px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <option value="">Stock: todas las ubicaciones</option>
+          {ubicaciones.fase === 'listo' &&
+            ubicaciones.data.map((u) => (
+              <option key={u.id} value={u.id}>
+                Stock: {u.nombre}
+              </option>
+            ))}
+        </select>
+      </div>
 
       {/* ---- Tabla ---- */}
       {productos.fase === 'cargando' && <FilaCargando />}
@@ -205,10 +235,10 @@ export function CatalogoScreen() {
                 <th className="px-4 py-3 font-medium">Código</th>
                 <th className="px-4 py-3 font-medium">Categoría</th>
                 <th className="px-4 py-3 font-medium">U/M</th>
-                <th className="px-4 py-3 font-medium">Precio c/IVA</th>
+                <th className="px-4 py-3 font-medium">Costo</th>
+                <th className="px-4 py-3 font-medium">Stock actual</th>
                 <th className="px-4 py-3 font-medium">Mín / Reorden</th>
-                <th className="px-4 py-3 font-medium">Etiquetas</th>
-                <th className="px-4 py-3 font-medium"></th>
+                <th className="px-4 py-3 font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -228,6 +258,7 @@ export function CatalogoScreen() {
                   <FilaProducto
                     key={p.id}
                     producto={p}
+                    stockActual={stockPorProducto.get(p.id) ?? 0}
                     editandoId={productoEditando?.id ?? null}
                     onEditar={abrirEditar}
                   />
@@ -247,10 +278,12 @@ export function CatalogoScreen() {
 
 function FilaProducto({
   producto,
+  stockActual,
   editandoId,
   onEditar,
 }: {
   producto: ProductoConCategoria
+  stockActual: number
   editandoId: string | null
   onEditar: (p: ProductoConCategoria) => void
 }) {
@@ -276,24 +309,18 @@ function FilaProducto({
         {producto.categoria?.nombre ?? '—'}
       </td>
       <td className="px-4 py-3 text-text-muted">
-        {LABELS_UNIDAD[producto.unidad_medida]}
+        {LABELS_UNIDAD[producto.unidad_medida] ?? producto.unidad_medida ?? '—'}
       </td>
       <td className="px-4 py-3 text-text-primary">
-        {producto.precio_con_iva != null
-          ? formatoMoneda.format(producto.precio_con_iva)
+        {producto.precio_sin_iva != null
+          ? formatoMoneda.format(producto.precio_sin_iva)
           : '—'}
       </td>
+      <td className="px-4 py-3 text-text-primary">{stockActual}</td>
       <td className="px-4 py-3">
         <span className="text-text-primary">{producto.stock_minimo}</span>
         <span className="mx-1 text-text-muted">/</span>
         <span className="text-text-primary">{producto.punto_reorden}</span>
-      </td>
-      <td className="px-4 py-3">
-        {producto.requiere_lote && (
-          <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-strong">
-            COFEPRIS
-          </span>
-        )}
       </td>
       <td className="px-4 py-3">
         <button
@@ -324,101 +351,6 @@ function FilaCargando() {
           <div className="ml-auto h-4 w-12 animate-pulse rounded bg-canvas" />
         </div>
       ))}
-    </div>
-  )
-}
-
-// ------------------------------------------------------------------
-// Clasificación financiera de categorías
-// ------------------------------------------------------------------
-
-/**
- * El Reporte de Finanzas (src/services/excelService.ts) necesita saber
- * si cada categoría cuenta como MATERIAL DENTAL o MAT. LIMPIEZA para
- * desglosar el bloque de Existencia Inicial — dato que no existía en
- * ninguna pantalla antes de esta sección. Colapsada por defecto porque
- * es una tarea de configuración ocasional, no parte del flujo diario
- * de captura de productos que domina esta pantalla.
- */
-function SeccionClasificacionFinanciera({
-  categorias,
-  onActualizado,
-}: {
-  categorias: Categoria[]
-  onActualizado: () => void
-}) {
-  const [abierta, setAbierta] = useState(false)
-  const [guardandoId, setGuardandoId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  async function manejarCambio(id: string, grupo: Enums<'grupo_financiero_categoria'>) {
-    setGuardandoId(id)
-    setError(null)
-
-    const resultado = await actualizarCategoria(id, { grupo_financiero: grupo })
-
-    setGuardandoId(null)
-
-    if (!resultado.success) {
-      setError(resultado.error.message)
-      return
-    }
-
-    onActualizado()
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-canvas-card">
-      <button
-        type="button"
-        onClick={() => setAbierta((a) => !a)}
-        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      >
-        <div>
-          <p className="text-sm font-semibold text-text-primary">Clasificación financiera de categorías</p>
-          <p className="mt-0.5 text-xs text-text-muted">
-            Usada por el Reporte de Finanzas para desglosar la Existencia Inicial en Material
-            Dental / Mat. Limpieza.
-          </p>
-        </div>
-        <span className="flex-shrink-0 text-xs font-medium text-text-muted">
-          {abierta ? 'Ocultar ▲' : 'Mostrar ▼'}
-        </span>
-      </button>
-
-      {abierta && (
-        <div className="border-t border-border p-4">
-          {error && (
-            <div className="mb-3 rounded-md bg-status-critico-soft p-2 text-xs text-status-critico">{error}</div>
-          )}
-
-          {categorias.length === 0 ? (
-            <p className="text-sm text-text-muted">No hay categorías registradas todavía.</p>
-          ) : (
-            <div className="space-y-2">
-              {categorias.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
-                >
-                  <span className="text-sm text-text-primary">{c.nombre}</span>
-                  <select
-                    value={c.grupo_financiero}
-                    disabled={guardandoId === c.id}
-                    onChange={(e) =>
-                      manejarCambio(c.id, e.target.value as Enums<'grupo_financiero_categoria'>)
-                    }
-                    className="rounded-md border border-border bg-canvas px-2 py-1 text-xs focus:border-accent focus:outline-none disabled:opacity-60"
-                  >
-                    <option value="MATERIAL_DENTAL">Material Dental</option>
-                    <option value="MATERIAL_LIMPIEZA">Mat. Limpieza</option>
-                  </select>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

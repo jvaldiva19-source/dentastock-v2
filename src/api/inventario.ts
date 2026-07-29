@@ -63,31 +63,31 @@ function ok<T>(data: T): InventarioResult<T> {
 // ------------------------------------------------------------------
 
 /**
- * Consulta las existencias físicas actuales de un área específica,
- * directamente desde la tabla materializada stock_ubicacion (mantenida
- * exclusivamente por el trigger trg_procesar_movimiento — esta función
- * nunca escribe en esa tabla, solo lee su estado ya calculado).
+ * Consulta las existencias físicas actuales, directamente desde la
+ * tabla materializada stock_ubicacion (mantenida exclusivamente por el
+ * trigger trg_procesar_movimiento — esta función nunca escribe en esa
+ * tabla, solo lee su estado ya calculado).
+ *
+ * Sin ubicacionId trae las existencias de TODAS las ubicaciones (uso:
+ * columna "Stock actual" del catálogo cuando el admin no filtró por
+ * ninguna área en particular), paginado con obtenerTodasLasFilas() por
+ * la misma razón que obtenerProductos().
  *
  * Un arreglo vacío es un resultado válido (un área recién creada sin
  * traspasos todavía no tiene filas en stock_ubicacion) y NO se trata
  * como error.
  */
 export async function obtenerStockPorUbicacion(
-  ubicacionId: string,
+  ubicacionId?: string,
 ): Promise<InventarioResult<StockUbicacion[]>> {
-  if (!ubicacionId || ubicacionId.trim().length === 0) {
-    return fail(
-      'UBICACION_INVALIDA',
-      'Debes especificar una ubicación válida para consultar su stock.',
-    )
-  }
-
   try {
-    const { data, error } = await supabase
-      .from('stock_ubicacion')
-      .select('*')
-      .eq('ubicacion_id', ubicacionId)
-      .order('ultima_actualizacion', { ascending: false })
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) => {
+      let consulta = supabase.from('stock_ubicacion').select('*')
+      if (ubicacionId) {
+        consulta = consulta.eq('ubicacion_id', ubicacionId)
+      }
+      return consulta.order('ultima_actualizacion', { ascending: false }).range(desde, hasta)
+    })
 
     if (error) {
       console.error('[inventario] obtenerStockPorUbicacion:', error)

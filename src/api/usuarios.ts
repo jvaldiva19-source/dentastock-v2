@@ -1,40 +1,42 @@
-import type { PostgrestError } from '@supabase/supabase-js'
+import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
-import type { Usuario, TablesInsert } from '../types/database.types'
+import type { Usuario, Enums } from '../types/database.types'
 
 /**
  * src/api/usuarios.ts
  *
- * Capa de gestión del personal de la clínica (tabla 'usuarios'). Antes
- * obtenerUsuarios() vivía en catalogo.ts (se agregó ahí de paso, solo
- * para alimentar el filtro "Usuario" de PanelAnalitica) — se movió
- * aquí porque ahora existe un módulo real de administración
- * (UsuariosScreen.tsx) y 'usuarios' no es un catálogo de inventario
- * como productos/categorías/proveedores/ubicaciones, es personal.
+ * Capa de gestión del personal de la clínica (tabla 'usuarios').
  *
- * NOTA DE AUTENTICACIÓN — LEER ANTES DE TOCAR crearUsuario(): esta
- * versión inserta directamente en la tabla pública 'usuarios' sin
- * crear ninguna cuenta real de Supabase Auth. auth_id es NOT NULL en
- * el esquema, así que aquí se genera un UUID aleatorio con
- * crypto.randomUUID() como marcador de posición — la persona queda
- * dada de alta en el directorio de personal, pero NO podrá iniciar
- * sesión hasta que se conecte con Supabase Auth (ej. un flujo de
- * invitación por correo que cree el auth.users real y actualice este
- * mismo registro con su id verdadero). Es una limitación conocida y
- * aceptada explícitamente para esta fase — no la resuelvas por tu
- * cuenta sin confirmarlo, ya que cambiar esto implica decidir el flujo
- * de invitación/alta de credenciales.
+ * NOTA DE AUTENTICACIÓN — crearUsuario() ya crea una cuenta REAL de
+ * Supabase Auth (a diferencia de la primera versión de este archivo,
+ * que solo insertaba en la tabla pública 'usuarios' con un auth_id
+ * aleatorio de marcador de posición — esa persona nunca podía iniciar
+ * sesión). El alta ahora pasa por la Edge Function
+ * supabase/functions/crear-usuario/index.ts, no por un INSERT directo
+ * desde el cliente, por dos razones que si o si requieren un contexto
+ * de servidor:
  *
- * Si 'usuarios.auth_id' tiene (o tuvo) una foreign key hacia
- * auth.users(id), un UUID generado en el cliente que no corresponde a
- * ninguna cuenta real de Auth SIEMPRE viola esa FK (23503) — por
- * diseño, no por un bug del INSERT. La migración
- * supabase/migrations/20260729120000_permitir_auth_id_independiente_en_usuarios.sql
- * elimina esa FK específicamente para permitir esta alta sin cuenta de
- * Auth todavía; traducirErrorPostgrest() de abajo además reconoce 23503
- * como defensa en profundidad, por si esa migración no se ha aplicado
- * todavía contra el proyecto real.
+ *   1. Crear una cuenta de Auth con contraseña propia requiere
+ *      `auth.admin.createUser()`, que SOLO funciona con la Service
+ *      Role Key — una clave que nunca debe llegar al navegador porque
+ *      ignora por completo RLS. Por eso esa clave vive únicamente
+ *      dentro de la Edge Function (Supabase la inyecta ahí sola),
+ *      jamás en una variable VITE_*.
+ *   2. La alternativa sin servidor, `supabase.auth.signUp()` desde el
+ *      cliente, se descartó a propósito: si se llama con la sesión de
+ *      un ADMINISTRADOR ya activa, signUp() puede reemplazar esa
+ *      sesión por la del usuario recién creado — el administrador
+ *      quedaría deslogueado de su propia sesión sin aviso.
+ *
+ * Desplegar la función (no se puede hacer desde este entorno — hace
+ * falta el CLI de Supabase autenticado contra tu proyecto real):
+ *
+ *   supabase functions deploy crear-usuario
+ *
+ * Mientras no esté desplegada, crearUsuario() devuelve un error claro
+ * en vez de fallar en silencio (ver el catch de invocarFuncion más
+ * abajo).
  */
 
 // ------------------------------------------------------------------
@@ -44,7 +46,10 @@ import type { Usuario, TablesInsert } from '../types/database.types'
 export type UsuariosErrorCode =
   | 'DATOS_INVALIDOS'
   | 'NOMBRE_USUARIO_DUPLICADO'
+  | 'CORREO_DUPLICADO'
   | 'UBICACION_REQUERIDA'
+  | 'SIN_PERMISOS'
+  | 'FUNCION_NO_DISPONIBLE'
   | 'CONSULTA_FALLIDA'
   | 'ERROR_RED'
   | 'ERROR_DESCONOCIDO'
@@ -67,74 +72,6 @@ function fail(code: UsuariosErrorCode, message: string): UsuariosResult<never> {
 
 function ok<T>(data: T): UsuariosResult<T> {
   return okResult(data)
-}
-
-/**
- * Traduce SQLSTATE de Postgres a códigos de dominio — mismo criterio
- * que traducirErrorPostgrest() en catalogo.ts: .code es el SQLSTATE
- * estándar, no depende de la redacción del mensaje. El mensaje por
- * defecto (rama final) SÍ incluye el código crudo — a diferencia del
- * resto de la app, aquí conviene que quien reporte el problema pueda
- * copiar el SQLSTATE exacto en vez de un texto genérico, precisamente
- * porque esta función ya falló una vez por un caso (23503) que no
- * estaba cubierto.
- */
-function traducirErrorPostgrest(error: PostgrestError): UsuariosApiError {
-  // 23505 = unique_violation (nombre_usuario ya existe)
-  if (error.code === '23505') {
-    return new UsuariosApiError(
-      'NOMBRE_USUARIO_DUPLICADO',
-      'Ya existe un usuario registrado con ese nombre de usuario.',
-    )
-  }
-
-  // 23514 = check_violation — cubre la restricción de negocio que exige
-  // ubicacion_id para PERSONAL_CLINICA (ver validarDatosUsuario más abajo,
-  // que ya valida esto antes de llegar aquí; esto es la red de respaldo
-  // del motor si algún día cambia el chequeo del lado del cliente).
-  if (error.code === '23514') {
-    return new UsuariosApiError(
-      'UBICACION_REQUERIDA',
-      'El personal de clínica requiere una ubicación asignada.',
-    )
-  }
-
-  // 23503 = foreign_key_violation. El caso esperado aquí es auth_id
-  // contra auth.users(id): el UUID generado en el cliente por
-  // crypto.randomUUID() no corresponde a ninguna cuenta real de
-  // Supabase Auth todavía. La migración
-  // 20260729120000_permitir_auth_id_independiente_en_usuarios.sql
-  // elimina esa FK — si este mensaje aparece, esa migración no se ha
-  // aplicado contra el proyecto (o hay otra FK violada, ver 'details').
-  if (error.code === '23503') {
-    return new UsuariosApiError(
-      'ERROR_DESCONOCIDO',
-      'No se pudo crear el usuario por una restricción de llave foránea (probablemente auth_id contra auth.users). Aplica la migración 20260729120000_permitir_auth_id_independiente_en_usuarios.sql contra tu proyecto de Supabase.',
-    )
-  }
-
-  // 23502 = not_null_violation — algún campo obligatorio llegó vacío
-  // sin que validarDatosUsuario() lo haya detectado antes.
-  if (error.code === '23502') {
-    return new UsuariosApiError(
-      'DATOS_INVALIDOS',
-      'Falta un dato obligatorio para crear el usuario. Revisa el formulario e intenta de nuevo.',
-    )
-  }
-
-  // 42501 = insufficient_privilege — la política RLS de INSERT en
-  // 'usuarios' rechazó al usuario actual (ej. no es ADMINISTRADOR).
-  if (error.code === '42501') {
-    return new UsuariosApiError(
-      'ERROR_DESCONOCIDO',
-      'Tu usuario no tiene permisos para crear nuevos usuarios en el sistema.',
-    )
-  }
-
-  return new UsuariosApiError(
-    'ERROR_DESCONOCIDO',
-    `Ocurrió un error al guardar el usuario (código ${error.code ?? 'desconocido'}: ${error.message}). Intenta de nuevo o contacta al administrador.`,
-  )
 }
 
 // ------------------------------------------------------------------
@@ -175,26 +112,41 @@ export async function obtenerUsuarios(): Promise<UsuariosResult<Usuario[]>> {
 // 2. crearUsuario
 // ------------------------------------------------------------------
 
+export interface DatosNuevoUsuario {
+  nombre_completo: string
+  nombre_usuario: string
+  /** Requerido: es el identificador de inicio de sesión de la cuenta de Auth. */
+  email: string
+  /** Contraseña inicial en texto plano — viaja solo hacia la Edge Function (HTTPS), nunca se persiste tal cual en 'usuarios'. */
+  password: string
+  rol: Enums<'rol_usuario'>
+  ubicacion_id: string | null
+  activo: boolean
+}
+
 /**
  * Espeja la misma restricción de negocio documentada en App.tsx
  * (resolverNombreUbicacion): solo PERSONAL_CLINICA está obligado a
  * tener ubicacion_id — ADMINISTRADOR no tiene una sola área fija.
- * Validado aquí en el cliente para un mensaje inmediato; el motor
- * sigue siendo la garantía real si esta regla también existe como
- * CONSTRAINT en la base de datos.
+ * Validado aquí en el cliente para un mensaje inmediato; la Edge
+ * Function repite estas mismas validaciones del lado del servidor,
+ * que es la garantía real.
  */
-function validarDatosUsuario(datos: {
-  nombre_completo?: string | null
-  nombre_usuario?: string
-  rol?: string
-  ubicacion_id?: string | null
-}): string | null {
+function validarDatosUsuario(datos: DatosNuevoUsuario): string | null {
   if (!datos.nombre_completo || datos.nombre_completo.trim().length === 0) {
     return 'El nombre completo es obligatorio.'
   }
 
   if (!datos.nombre_usuario || datos.nombre_usuario.trim().length === 0) {
     return 'El nombre de usuario es obligatorio.'
+  }
+
+  if (!datos.email || !datos.email.includes('@')) {
+    return 'Debes capturar un correo electrónico válido — es el identificador de inicio de sesión.'
+  }
+
+  if (!datos.password || datos.password.length < 8) {
+    return 'La contraseña debe tener al menos 8 caracteres.'
   }
 
   if (!datos.rol) {
@@ -209,14 +161,34 @@ function validarDatosUsuario(datos: {
 }
 
 /**
- * Alta de personal en el directorio — ver la nota de autenticación al
- * inicio del archivo: auth_id se genera aquí como UUID aleatorio
- * (marcador de posición) porque todavía no existe integración con
- * Supabase Auth. `datos` no incluye auth_id ni created_at/updated_at
- * porque esta función es la única responsable de generarlos.
+ * Lee el mensaje de error que la Edge Function ya devuelve traducido
+ * ({"error": "..."} en el cuerpo de la respuesta) — invoke() no expone
+ * ese cuerpo directamente en FunctionsHttpError, hay que leerlo de
+ * error.context (el Response crudo).
+ */
+async function leerMensajeDeFuncion(error: unknown): Promise<string | null> {
+  if (!(error instanceof FunctionsHttpError)) {
+    return null
+  }
+
+  try {
+    const cuerpo = await error.context.json()
+    return typeof cuerpo?.error === 'string' ? cuerpo.error : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Alta real de personal: crea la cuenta de Supabase Auth (correo +
+ * contraseña) Y el perfil en 'public.usuarios' en una sola operación
+ * atómica, vía la Edge Function crear-usuario (ver la nota de
+ * autenticación al inicio del archivo sobre por qué no es un INSERT
+ * directo). La persona puede iniciar sesión de inmediato con el
+ * correo y la contraseña capturados aquí.
  */
 export async function crearUsuario(
-  datos: Omit<TablesInsert<'usuarios'>, 'auth_id'>,
+  datos: DatosNuevoUsuario,
 ): Promise<UsuariosResult<Usuario>> {
   const errorValidacion = validarDatosUsuario(datos)
   if (errorValidacion) {
@@ -224,32 +196,46 @@ export async function crearUsuario(
   }
 
   try {
-    const payload: TablesInsert<'usuarios'> = {
-      ...datos,
-      nombre_usuario: datos.nombre_usuario.trim().toLowerCase(),
-      nombre_completo: datos.nombre_completo?.trim() || null,
-      // Marcador de posición hasta conectar con Supabase Auth — ver
-      // nota de autenticación al inicio del archivo.
-      auth_id: crypto.randomUUID(),
+    const { data, error } = await supabase.functions.invoke('crear-usuario', {
+      body: {
+        nombre_completo: datos.nombre_completo.trim(),
+        nombre_usuario: datos.nombre_usuario.trim().toLowerCase(),
+        email: datos.email.trim(),
+        password: datos.password,
+        rol: datos.rol,
+        ubicacion_id: datos.rol === 'PERSONAL_CLINICA' ? datos.ubicacion_id : null,
+        activo: datos.activo,
+      },
+    })
+
+    if (error) {
+      const mensajeFuncion = await leerMensajeDeFuncion(error)
+      console.error('[usuarios] crearUsuario (edge function):', error, mensajeFuncion)
+
+      if (mensajeFuncion) {
+        const codigo: UsuariosErrorCode = mensajeFuncion.includes('nombre de usuario')
+          ? 'NOMBRE_USUARIO_DUPLICADO'
+          : mensajeFuncion.includes('correo')
+            ? 'CORREO_DUPLICADO'
+            : mensajeFuncion.includes('ubicación')
+              ? 'UBICACION_REQUERIDA'
+              : mensajeFuncion.includes('permisos')
+                ? 'SIN_PERMISOS'
+                : 'ERROR_DESCONOCIDO'
+
+        return fail(codigo, mensajeFuncion)
+      }
+
+      // No hubo cuerpo JSON legible: lo más probable es que la función
+      // todavía no esté desplegada en el proyecto (404) o un fallo de
+      // red, no un rechazo de negocio.
+      return fail(
+        'FUNCION_NO_DISPONIBLE',
+        'No se pudo contactar la función "crear-usuario". Verifica que esté desplegada en tu proyecto de Supabase (supabase functions deploy crear-usuario).',
+      )
     }
 
-    const { data: usuario, error } = await supabase
-      .from('usuarios')
-      .insert(payload)
-      .select()
-      .single()
-
-    if (error || !usuario) {
-      console.error('[usuarios] crearUsuario:', {
-        code: error?.code,
-        message: error?.message,
-        details: error?.details,
-        hint: error?.hint,
-      })
-      return failResult(traducirErrorPostgrest(error!))
-    }
-
-    return ok(usuario)
+    return ok(data.usuario as Usuario)
   } catch (err) {
     console.error('[usuarios] crearUsuario (excepción):', err)
     return fail(

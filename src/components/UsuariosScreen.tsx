@@ -21,7 +21,9 @@ import type { Ubicacion, Enums } from '../types/database.types'
  * global ni prop drilling.
  *
  * Ver la nota de autenticación al inicio de src/api/usuarios.ts: el
- * alta de aquí NO crea todavía una cuenta real de Supabase Auth.
+ * alta de aquí SÍ crea una cuenta real de Supabase Auth (vía la Edge
+ * Function crear-usuario), con la contraseña inicial capturada en
+ * este formulario — la persona puede iniciar sesión de inmediato.
  */
 
 const ETIQUETAS_ROL: Record<Enums<'rol_usuario'>, string> = {
@@ -30,6 +32,20 @@ const ETIQUETAS_ROL: Record<Enums<'rol_usuario'>, string> = {
 }
 
 const ROLES = Object.keys(ETIQUETAS_ROL) as Enums<'rol_usuario'>[]
+
+/**
+ * Genera una contraseña inicial razonablemente fuerte (12 caracteres,
+ * mezclando mayúsculas/minúsculas/dígitos/símbolos) con
+ * crypto.getRandomValues() — no Math.random(), que no es
+ * criptográficamente seguro. Es solo un punto de partida cómodo para
+ * el administrador; el campo sigue siendo editable a mano.
+ */
+function generarPasswordSegura(): string {
+  const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%'
+  const valores = new Uint32Array(12)
+  crypto.getRandomValues(valores)
+  return Array.from(valores, (v) => ALFABETO[v % ALFABETO.length]).join('')
+}
 
 export function UsuariosScreen() {
   const [refreshKey, setRefreshKey] = useState(0)
@@ -212,6 +228,8 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
   const [nombreCompleto, setNombreCompleto] = useState('')
   const [nombreUsuario, setNombreUsuario] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [mostrarPassword, setMostrarPassword] = useState(false)
   const [rol, setRol] = useState<Enums<'rol_usuario'>>('PERSONAL_CLINICA')
   const [ubicacionId, setUbicacionId] = useState('')
   const [activo, setActivo] = useState(true)
@@ -235,7 +253,8 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
     const resultado = await crearUsuario({
       nombre_completo: nombreCompleto.trim(),
       nombre_usuario: nombreUsuario.trim(),
-      email: email.trim() || null,
+      email: email.trim(),
+      password,
       rol,
       ubicacion_id: rol === 'PERSONAL_CLINICA' ? ubicacionId : null,
       activo,
@@ -248,10 +267,14 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
       return
     }
 
-    setExito(`Usuario "${resultado.data.nombre_completo}" creado exitosamente.`)
+    setExito(
+      `Usuario "${resultado.data.nombre_completo}" creado exitosamente. Comparte con la persona su correo y la contraseña capturada — ya puede iniciar sesión con ellos.`,
+    )
     setNombreCompleto('')
     setNombreUsuario('')
     setEmail('')
+    setPassword('')
+    setMostrarPassword(false)
     setRol('PERSONAL_CLINICA')
     setUbicacionId('')
     setActivo(true)
@@ -313,17 +336,21 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="usr-email" className={claseLabel}>
-              Correo electrónico (opcional)
+              Correo electrónico
             </label>
             <input
               id="usr-email"
               type="email"
+              required
               value={email}
               disabled={enviando}
               onChange={(e) => setEmail(e.target.value)}
               className={claseInput}
               placeholder="nombre@clinica.mx"
             />
+            <p className="mt-1 text-[10px] text-text-muted">
+              Es el identificador con el que la persona inicia sesión.
+            </p>
           </div>
           <div>
             <label htmlFor="usr-rol" className={claseLabel}>
@@ -343,6 +370,51 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Contraseña inicial */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label htmlFor="usr-password" className="text-xs font-medium text-text-muted">
+              Contraseña inicial
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setPassword(generarPasswordSegura())
+                setMostrarPassword(true)
+              }}
+              disabled={enviando}
+              className="text-[10px] font-medium text-accent-strong underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Generar contraseña
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              id="usr-password"
+              type={mostrarPassword ? 'text' : 'password'}
+              required
+              minLength={8}
+              value={password}
+              disabled={enviando}
+              onChange={(e) => setPassword(e.target.value)}
+              className={`${claseInput} pr-16 font-mono`}
+              placeholder="Mínimo 8 caracteres"
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              onClick={() => setMostrarPassword((v) => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-[10px] font-medium text-text-muted hover:text-text-primary"
+            >
+              {mostrarPassword ? 'Ocultar' : 'Mostrar'}
+            </button>
+          </div>
+          <p className="mt-1 text-[10px] text-text-muted">
+            Compártela directamente con la persona — todavía no existe un flujo de invitación por
+            correo, así que es la única forma en que sabrá su contraseña inicial.
+          </p>
         </div>
 
         {/* Ubicación — obligatoria solo para Personal de Clínica */}

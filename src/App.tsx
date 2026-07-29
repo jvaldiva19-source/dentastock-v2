@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { subscribeToAuthChanges, getPerfilActual, type PerfilActual } from './api/auth'
+import { subscribeToAuthChanges, getPerfilActual, signOut, type PerfilActual } from './api/auth'
 import { obtenerUbicaciones } from './api/catalogo'
 import { LoginScreen } from './components/LoginScreen'
 import { MainLayout, type VistaPrincipal } from './components/MainLayout'
@@ -212,7 +212,39 @@ function PantallaCarga({ mensaje }: { mensaje: string }) {
   )
 }
 
+/**
+ * Único punto de la app donde una pantalla de estado NO está montada
+ * dentro de MainLayout — a diferencia de PanelAccesoRestringido (que
+ * sigue teniendo el sidebar completo con su propio botón de cerrar
+ * sesión y navegación), aquí getPerfilActual() falló, así que no hay
+ * ni perfil ni ubicación para construir el layout. Sin un botón propio
+ * de salida, quien cae aquí queda atrapado sin más opción que recargar
+ * la pestaña — por eso este botón, igual que el de MainLayout, usa el
+ * wrapper signOut() de api/auth.ts (nunca supabase.auth.* directo, ver
+ * la nota de auth.ts). Cerrar la sesión dispara el listener de
+ * subscribeToAuthChanges() en App(), que a su vez pasa el estado a
+ * 'sin_sesion' y monta LoginScreen — el "volver al inicio" ocurre solo,
+ * no hace falta una navegación manual aparte.
+ */
 function PantallaErrorPerfil({ mensaje }: { mensaje: string }) {
+  const [cerrandoSesion, setCerrandoSesion] = useState(false)
+  const [errorCierre, setErrorCierre] = useState<string | null>(null)
+
+  async function manejarCerrarSesion() {
+    setCerrandoSesion(true)
+    setErrorCierre(null)
+
+    const resultado = await signOut()
+
+    if (!resultado.success) {
+      setErrorCierre(resultado.error.message)
+      setCerrandoSesion(false)
+    }
+
+    // Sin redirección manual en el caso de éxito: el listener de
+    // subscribeToAuthChanges() en App() se encarga de pasar a LoginScreen.
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink-900 px-4">
       <div className="w-full max-w-sm rounded-lg bg-canvas-card p-8 text-center shadow-xl">
@@ -220,6 +252,16 @@ function PantallaErrorPerfil({ mensaje }: { mensaje: string }) {
           No se pudo cargar tu perfil
         </p>
         <p className="text-sm text-text-muted">{mensaje}</p>
+
+        <button
+          type="button"
+          onClick={manejarCerrarSesion}
+          disabled={cerrandoSesion}
+          className="mt-6 w-full rounded-md bg-ink-900 px-4 py-2.5 text-sm font-medium text-text-onink transition-colors hover:bg-ink-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+        >
+          {cerrandoSesion ? 'Cerrando sesión…' : 'Cerrar sesión / Volver al inicio'}
+        </button>
+        {errorCierre && <p className="mt-2 text-xs text-status-critico">{errorCierre}</p>}
       </div>
     </div>
   )

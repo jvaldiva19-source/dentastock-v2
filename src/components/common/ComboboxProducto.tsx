@@ -20,10 +20,23 @@ import type { ProductoConCategoria } from '../../api/catalogo'
 
 const MAX_RESULTADOS = 50
 
+const formatoMoneda = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+})
+
+// Antepone el código de barras (en vez de dejarlo al final) y agrega el
+// precio con IVA: con más de 1,600 insumos, varios conceptos casi
+// idénticos solo se distinguen por presentación/precio (ej. dos
+// "ACETATO RÍGIDO PAQ." de proveedores distintos), y el código de barras
+// es la única llave inequívoca para elegir el correcto.
 function etiquetaProducto(producto: ProductoConCategoria): string {
-  return producto.codigo_barras
-    ? `${producto.concepto} (${producto.codigo_barras})`
-    : producto.concepto
+  if (!producto.codigo_barras) return producto.concepto
+
+  const precio =
+    producto.precio_con_iva != null ? ` (${formatoMoneda.format(producto.precio_con_iva)})` : ''
+
+  return `[${producto.codigo_barras}] ${producto.concepto}${precio}`
 }
 
 interface ComboboxProductoProps {
@@ -178,7 +191,10 @@ export function ComboboxProducto({
             >
               <span className="block">{producto.concepto}</span>
               {producto.codigo_barras && (
-                <span className="block text-xs text-text-muted">{producto.codigo_barras}</span>
+                <span className="block text-xs text-text-muted">
+                  {producto.codigo_barras}
+                  {producto.precio_con_iva != null && ` · ${formatoMoneda.format(producto.precio_con_iva)}`}
+                </span>
               )}
             </button>
           ))}

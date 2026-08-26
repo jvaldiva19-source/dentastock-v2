@@ -30,11 +30,20 @@ const formatoMoneda = new Intl.NumberFormat('es-MX', {
 // idénticos solo se distinguen por presentación/precio (ej. dos
 // "ACETATO RÍGIDO PAQ." de proveedores distintos), y el código de barras
 // es la única llave inequívoca para elegir el correcto.
-function etiquetaProducto(producto: ProductoConCategoria): string {
+//
+// mostrarPrecio=false omite el segmento de precio por completo — usado
+// por las pantallas de farmacia (MiFarmaciaScreen), donde un
+// ENCARGADO_FARMACIA no debe ver cifras monetarias en ningún punto de
+// la UI (ver la limitación de seguridad documentada en las migraciones
+// del módulo de farmacias: esto es la mitigación de UI, no la garantía
+// real, que vive en RLS/las vistas del backend).
+function etiquetaProducto(producto: ProductoConCategoria, mostrarPrecio: boolean): string {
   if (!producto.codigo_barras) return producto.concepto
 
   const precio =
-    producto.precio_con_iva != null ? ` (${formatoMoneda.format(producto.precio_con_iva)})` : ''
+    mostrarPrecio && producto.precio_con_iva != null
+      ? ` (${formatoMoneda.format(producto.precio_con_iva)})`
+      : ''
 
   return `[${producto.codigo_barras}] ${producto.concepto}${precio}`
 }
@@ -45,6 +54,8 @@ interface ComboboxProductoProps {
   onChange: (id: string) => void
   placeholder?: string
   required?: boolean
+  /** Default true. false oculta el precio en la etiqueta y en la lista de opciones. */
+  mostrarPrecio?: boolean
 }
 
 export function ComboboxProducto({
@@ -53,6 +64,7 @@ export function ComboboxProducto({
   onChange,
   placeholder = 'Escribe para buscar por nombre o código...',
   required,
+  mostrarPrecio = true,
 }: ComboboxProductoProps) {
   const [texto, setTexto] = useState('')
   const [abierto, setAbierto] = useState(false)
@@ -65,8 +77,8 @@ export function ComboboxProducto({
   // '' que hacen los formularios tras un submit exitoso.
   useEffect(() => {
     const seleccionado = productos.find((p) => p.id === value)
-    setTexto(seleccionado ? etiquetaProducto(seleccionado) : '')
-  }, [value, productos])
+    setTexto(seleccionado ? etiquetaProducto(seleccionado, mostrarPrecio) : '')
+  }, [value, productos, mostrarPrecio])
 
   useEffect(() => {
     return () => {
@@ -94,7 +106,7 @@ export function ComboboxProducto({
 
   function seleccionar(producto: ProductoConCategoria) {
     onChange(producto.id)
-    setTexto(etiquetaProducto(producto))
+    setTexto(etiquetaProducto(producto, mostrarPrecio))
     setAbierto(false)
   }
 
@@ -114,7 +126,7 @@ export function ComboboxProducto({
     cierreDiferidoRef.current = window.setTimeout(() => {
       setAbierto(false)
       const seleccionado = productos.find((p) => p.id === value)
-      setTexto(seleccionado ? etiquetaProducto(seleccionado) : '')
+      setTexto(seleccionado ? etiquetaProducto(seleccionado, mostrarPrecio) : '')
     }, 150)
   }
 
@@ -193,7 +205,9 @@ export function ComboboxProducto({
               {producto.codigo_barras && (
                 <span className="block text-xs text-text-muted">
                   {producto.codigo_barras}
-                  {producto.precio_con_iva != null && ` · ${formatoMoneda.format(producto.precio_con_iva)}`}
+                  {mostrarPrecio &&
+                    producto.precio_con_iva != null &&
+                    ` · ${formatoMoneda.format(producto.precio_con_iva)}`}
                 </span>
               )}
             </button>

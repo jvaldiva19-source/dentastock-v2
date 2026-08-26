@@ -8,6 +8,9 @@ import { MovimientosScreen } from './components/MovimientosScreen'
 import { CatalogoScreen } from './components/CatalogoScreen'
 import { ReportesScreen } from './components/ReportesScreen'
 import { UsuariosScreen } from './components/UsuariosScreen'
+import { MiFarmaciaScreen } from './components/MiFarmaciaScreen'
+import { GestionFarmaciasScreen } from './components/GestionFarmaciasScreen'
+import type { RolUsuario } from './types/database.types'
 
 /**
  * src/App.tsx
@@ -42,18 +45,30 @@ type EstadoApp =
   | { fase: 'listo'; perfil: PerfilActual; ubicacionNombre: string | null }
 
 /**
- * Vistas reservadas a ADMINISTRADOR, espejo exacto de la bandera
- * soloAdministrador ya declarada en MainLayout.tsx. Se duplica aquí
+ * Vistas permitidas por rol, espejo exacto de rolesPermitidos ya
+ * declarado por cada ItemNav en MainLayout.tsx. Se duplica aquí
  * deliberadamente como defensa en profundidad: MainLayout ya oculta
  * los botones de navegación correspondientes, pero si vistaActiva
- * llegara a quedar en uno de estos valores por cualquier otra vía,
- * el área de contenido debe rechazarlo en vez de confiar
+ * llegara a quedar en una vista no permitida por cualquier otra vía,
+ * el área de contenido debe rechazarla en vez de confiar
  * silenciosamente en que la barra lateral hizo bien su trabajo — el
  * mismo principio de "no confiar en una sola capa" que ya aplicamos
  * al dejar que el motor de PostgreSQL valide el stock además de la
  * lógica de la aplicación.
+ *
+ * ENCARGADO_FARMACIA solo tiene 'mi-farmacia': a diferencia del
+ * modelo anterior (donde ambos roles compartían Dashboard y
+ * Movimientos), este rol nunca debe llegar a pantallas con costos o
+ * dashboards financieros — ver la nota de MiFarmaciaScreen.tsx.
  */
-const VISTAS_SOLO_ADMINISTRADOR: VistaPrincipal[] = ['catalogo', 'reportes', 'usuarios']
+const VISTAS_POR_ROL: Record<RolUsuario, VistaPrincipal[]> = {
+  ADMIN: ['dashboard', 'catalogo', 'movimientos', 'reportes', 'usuarios', 'farmacias'],
+  ENCARGADO_FARMACIA: ['mi-farmacia'],
+}
+
+function vistaInicialParaRol(rol: RolUsuario): VistaPrincipal {
+  return rol === 'ADMIN' ? 'dashboard' : 'mi-farmacia'
+}
 
 export default function App() {
   const [estado, setEstado] = useState<EstadoApp>({ fase: 'verificando_sesion' })
@@ -100,7 +115,7 @@ export default function App() {
     const perfil = resultadoPerfil.data
     const ubicacionNombre = await resolverNombreUbicacion(perfil)
 
-    setVistaActiva('dashboard')
+    setVistaActiva(vistaInicialParaRol(perfil.rol))
     setEstado({ fase: 'listo', perfil, ubicacionNombre })
   }
 
@@ -122,8 +137,7 @@ export default function App() {
 
   // estado.fase === 'listo'
   const { perfil, ubicacionNombre } = estado
-  const vistaPermitida =
-    !VISTAS_SOLO_ADMINISTRADOR.includes(vistaActiva) || perfil.rol === 'ADMINISTRADOR'
+  const vistaPermitida = VISTAS_POR_ROL[perfil.rol].includes(vistaActiva)
 
   return (
     <MainLayout
@@ -136,7 +150,7 @@ export default function App() {
       onNavegar={setVistaActiva}
     >
       {vistaPermitida ? (
-        <ContenidoVista vista={vistaActiva} />
+        <ContenidoVista vista={vistaActiva} perfil={perfil} />
       ) : (
         <PanelAccesoRestringido />
       )}
@@ -150,13 +164,13 @@ export default function App() {
 
 /**
  * Traduce perfil.ubicacionId (UUID) a un nombre legible como
- * "Farmacia 2". ADMINISTRADOR no tiene una sola ubicación fija por
+ * "Farmacia 2". ADMIN no tiene una sola ubicación fija por
  * diseño (ver CONSTRAINT area_requiere_ubicacion en
- * docs/arquitectura.md: solo PERSONAL_CLINICA está obligado a tener
+ * docs/arquitectura.md: solo ENCARGADO_FARMACIA está obligado a tener
  * ubicacion_id) — para ese rol se devuelve null y MainLayout ya sabe
  * mostrar "Todas las ubicaciones" en su lugar.
  *
- * Si el rol es PERSONAL_CLINICA pero la consulta de ubicaciones falla
+ * Si el rol es ENCARGADO_FARMACIA pero la consulta de ubicaciones falla
  * o el id no aparece en la lista (por ejemplo, una ubicación fue
  * desactivada después de asignarse), se devuelve null en vez de
  * bloquear el acceso completo del usuario por un dato puramente
@@ -166,7 +180,7 @@ export default function App() {
 async function resolverNombreUbicacion(
   perfil: PerfilActual,
 ): Promise<string | null> {
-  if (perfil.rol === 'ADMINISTRADOR' || !perfil.ubicacionId) {
+  if (perfil.rol === 'ADMIN' || !perfil.ubicacionId) {
     return null
   }
 
@@ -282,15 +296,7 @@ function PanelAccesoRestringido() {
 // Despacho de vistas operativas
 // ------------------------------------------------------------------
 
-/**
- * Marcador de posición deliberado para cada vista: los módulos reales
- * (DashboardScreen, CatalogoScreen, MovimientosScreen, ReportesScreen)
- * todavía no se han construido en esta sesión. Reemplazar cada caso
- * de este switch por el componente correspondiente es el siguiente
- * trabajo de src/components/, módulo por módulo — exactamente como
- * hemos venido avanzando con la capa de api/.
- */
-function ContenidoVista({ vista }: { vista: VistaPrincipal }) {
+function ContenidoVista({ vista, perfil }: { vista: VistaPrincipal; perfil: PerfilActual }) {
   switch (vista) {
     case 'dashboard':
       return <DashboardScreen />
@@ -302,6 +308,10 @@ function ContenidoVista({ vista }: { vista: VistaPrincipal }) {
       return <ReportesScreen />
     case 'usuarios':
       return <UsuariosScreen />
+    case 'farmacias':
+      return <GestionFarmaciasScreen />
+    case 'mi-farmacia':
+      return <MiFarmaciaScreen perfil={perfil} />
     default:
       return (
         <PanelMarcador

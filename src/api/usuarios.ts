@@ -25,7 +25,7 @@ import type { Usuario, Enums } from '../types/database.types'
  *      jamás en una variable VITE_*.
  *   2. La alternativa sin servidor, `supabase.auth.signUp()` desde el
  *      cliente, se descartó a propósito: si se llama con la sesión de
- *      un ADMINISTRADOR ya activa, signUp() puede reemplazar esa
+ *      un ADMIN ya activa, signUp() puede reemplazar esa
  *      sesión por la del usuario recién creado — el administrador
  *      quedaría deslogueado de su propia sesión sin aviso.
  *
@@ -126,8 +126,8 @@ export interface DatosNuevoUsuario {
 
 /**
  * Espeja la misma restricción de negocio documentada en App.tsx
- * (resolverNombreUbicacion): solo PERSONAL_CLINICA está obligado a
- * tener ubicacion_id — ADMINISTRADOR no tiene una sola área fija.
+ * (resolverNombreUbicacion): solo ENCARGADO_FARMACIA está obligado a
+ * tener ubicacion_id — ADMIN no tiene una sola área fija.
  * Validado aquí en el cliente para un mensaje inmediato; la Edge
  * Function repite estas mismas validaciones del lado del servidor,
  * que es la garantía real.
@@ -153,8 +153,8 @@ function validarDatosUsuario(datos: DatosNuevoUsuario): string | null {
     return 'Debes seleccionar un rol para el usuario.'
   }
 
-  if (datos.rol === 'PERSONAL_CLINICA' && !datos.ubicacion_id) {
-    return 'El personal de clínica requiere una ubicación asignada.'
+  if (datos.rol === 'ENCARGADO_FARMACIA' && !datos.ubicacion_id) {
+    return 'El encargado de farmacia requiere una ubicación asignada.'
   }
 
   return null
@@ -203,7 +203,7 @@ export async function crearUsuario(
         email: datos.email.trim(),
         password: datos.password,
         rol: datos.rol,
-        ubicacion_id: datos.rol === 'PERSONAL_CLINICA' ? datos.ubicacion_id : null,
+        ubicacion_id: datos.rol === 'ENCARGADO_FARMACIA' ? datos.ubicacion_id : null,
         activo: datos.activo,
       },
     })

@@ -471,6 +471,108 @@ async function seleccionarLotePeps(
   return data
 }
 
+// ------------------------------------------------------------------
+// 4. registrarSalidaPractica
+// ------------------------------------------------------------------
+
+export interface DatosSalidaPractica {
+  productoId: string
+  ubicacionId: string
+  cantidad: number
+  usuarioId: string
+  /** Nombre/matrícula del alumno o referencia de bitácora — obligatorio. */
+  alumnoReferencia: string
+  comentario?: string
+}
+
+/**
+ * Registra una baja SALIDA_PRACTICA en una farmacia (consumo de
+ * alumnos/prácticas clínicas), hermana de registrarConsumo() pero como
+ * función separada en vez de extender esa: registrarConsumo() ya cubre
+ * CONSUMO y MERMA_CADUCIDAD con su propio contrato de validación, y no
+ * queríamos arriesgar esos flujos existentes al añadirle un tercer tipo
+ * con una regla de obligatoriedad distinta (alumno_referencia en vez de
+ * comentario). Reutiliza la misma selección PEPS/FIFO de lote vía
+ * seleccionarLotePeps() cuando el producto requiere lote — con la
+ * política RLS farmacia_restringe_lotes (ver migración
+ * 20260826100500), ese SELECT ya queda acotado a lotes que
+ * efectivamente llegaron a la ubicación del ENCARGADO_FARMACIA que
+ * llama a esta función.
+ */
+export async function registrarSalidaPractica(
+  datos: DatosSalidaPractica,
+): Promise<MovimientosResult<Movimiento>> {
+  if (datos.cantidad <= 0) {
+    return fail('DATOS_INVALIDOS', 'La cantidad a registrar debe ser mayor a cero.')
+  }
+
+  if (!datos.alumnoReferencia || datos.alumnoReferencia.trim().length === 0) {
+    return fail(
+      'DATOS_INVALIDOS',
+      'Debes capturar el nombre/matrícula del alumno o una referencia de bitácora.',
+    )
+  }
+
+  try {
+    const { data: producto, error: errorProducto } = await supabase
+      .from('productos')
+      .select('requiere_lote')
+      .eq('id', datos.productoId)
+      .single()
+
+    if (errorProducto || !producto) {
+      console.error(
+        '[movimientos] registrarSalidaPractica — producto no encontrado:',
+        errorProducto,
+      )
+      return fail('DATOS_INVALIDOS', 'El producto especificado no existe en el catálogo.')
+    }
+
+    let loteId: string | null = null
+
+    if (producto.requiere_lote) {
+      const lote = await seleccionarLotePeps(datos.productoId)
+
+      if (!lote) {
+        return fail(
+          'LOTE_NO_DISPONIBLE',
+          'No hay lotes activos con existencia disponible para este producto en tu farmacia.',
+        )
+      }
+
+      loteId = lote.id
+    }
+
+    const { data: movimiento, error: errorMovimiento } = await supabase
+      .from('movimientos')
+      .insert({
+        tipo: 'SALIDA_PRACTICA' satisfies TipoMovimiento,
+        producto_id: datos.productoId,
+        lote_id: loteId,
+        ubicacion_origen_id: datos.ubicacionId,
+        cantidad: datos.cantidad,
+        alumno_referencia: datos.alumnoReferencia.trim(),
+        comentario: datos.comentario?.trim() || null,
+        usuario_id: datos.usuarioId,
+      })
+      .select()
+      .single()
+
+    if (errorMovimiento || !movimiento) {
+      console.error('[movimientos] registrarSalidaPractica:', errorMovimiento)
+      return failResult(traducirErrorMotor(errorMovimiento?.message ?? ''))
+    }
+
+    return ok(movimiento)
+  } catch (err) {
+    console.error('[movimientos] registrarSalidaPractica (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para registrar la salida por práctica.',
+    )
+  }
+}
+
 /* ====================================================================
  * DDL DE REFERENCIA — fn_registrar_traspaso
  * ====================================================================

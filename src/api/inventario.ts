@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
 import { obtenerTodasLasFilas } from '../lib/paginacion'
-import type { StockUbicacion, TipoMovimiento, Views } from '../types/database.types'
+import type { StockUbicacion, TipoMovimiento, Views, StockFarmacia, ConsumoPractica } from '../types/database.types'
 
 /**
  * src/api/inventario.ts
@@ -233,18 +233,20 @@ export async function obtenerAnalisisReposicion(): Promise<
  * directamente exportable a Excel sin necesidad de reordenar en el
  * cliente.
  */
-export async function obtenerValorizacionInventario(): Promise<
-  InventarioResult<Views<'v_valorizacion_inventario'>[]>
-> {
+export async function obtenerValorizacionInventario(
+  ubicacionId?: string,
+): Promise<InventarioResult<Views<'v_valorizacion_inventario'>[]>> {
   try {
-    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
-      supabase
-        .from('v_valorizacion_inventario')
-        .select('*')
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) => {
+      let consulta = supabase.from('v_valorizacion_inventario').select('*')
+      if (ubicacionId) {
+        consulta = consulta.eq('ubicacion_id', ubicacionId)
+      }
+      return consulta
         .order('area', { ascending: true })
         .order('concepto', { ascending: true })
-        .range(desde, hasta),
-    )
+        .range(desde, hasta)
+    })
 
     if (error) {
       console.error('[inventario] obtenerValorizacionInventario:', error)
@@ -354,6 +356,101 @@ export async function obtenerMovimientosRecientes(
     return fail(
       'ERROR_RED',
       'No fue posible conectar con el servidor para consultar el historial de movimientos.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 6. obtenerStockFarmacia
+// ------------------------------------------------------------------
+
+/**
+ * Consulta v_stock_farmacia (sin ninguna columna de precio/costo, ver
+ * la nota de esa vista en la migración 20260826100700) filtrada a una
+ * sola ubicación. Es la única fuente de stock que usa MiFarmaciaScreen
+ * — nunca obtenerStockPorUbicacion() ni obtenerValorizacionInventario(),
+ * que sí exponen o pueden exponer valor monetario.
+ */
+export async function obtenerStockFarmacia(
+  ubicacionId: string,
+): Promise<InventarioResult<StockFarmacia[]>> {
+  try {
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
+      supabase
+        .from('v_stock_farmacia')
+        .select('*')
+        .eq('ubicacion_id', ubicacionId)
+        .order('concepto', { ascending: true })
+        .range(desde, hasta),
+    )
+
+    if (error) {
+      console.error('[inventario] obtenerStockFarmacia:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo consultar el stock de la farmacia. Intenta de nuevo.',
+      )
+    }
+
+    return ok(data ?? [])
+  } catch (err) {
+    console.error('[inventario] obtenerStockFarmacia (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para consultar el stock de la farmacia.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 7. obtenerConsumoPracticas
+// ------------------------------------------------------------------
+
+export interface FiltroConsumoPracticas {
+  ubicacionId?: string
+  fechaInicio?: string
+  fechaFin?: string
+}
+
+/**
+ * Consulta v_consumo_practicas (detalle, no agregado, de bajas
+ * SALIDA_PRACTICA) para el historial por alumno/práctica de "Gestión y
+ * Analítica de Farmacias". La agregación por alumno/producto/rango se
+ * hace en el cliente, mismo criterio que PanelConsumoPorAreasGrafica en
+ * PanelAnalitica.tsx.
+ */
+export async function obtenerConsumoPracticas(
+  filtros: FiltroConsumoPracticas = {},
+): Promise<InventarioResult<ConsumoPractica[]>> {
+  try {
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) => {
+      let consulta = supabase.from('v_consumo_practicas').select('*')
+      if (filtros.ubicacionId) {
+        consulta = consulta.eq('ubicacion_origen_id', filtros.ubicacionId)
+      }
+      if (filtros.fechaInicio) {
+        consulta = consulta.gte('created_at', filtros.fechaInicio)
+      }
+      if (filtros.fechaFin) {
+        consulta = consulta.lte('created_at', filtros.fechaFin)
+      }
+      return consulta.order('created_at', { ascending: false }).range(desde, hasta)
+    })
+
+    if (error) {
+      console.error('[inventario] obtenerConsumoPracticas:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo consultar el historial de consumo por práctica. Intenta de nuevo.',
+      )
+    }
+
+    return ok(data ?? [])
+  } catch (err) {
+    console.error('[inventario] obtenerConsumoPracticas (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para consultar el consumo por práctica.',
     )
   }
 }

@@ -9,7 +9,7 @@ import type { Ubicacion, Enums } from '../types/database.types'
  * src/components/UsuariosScreen.tsx
  *
  * Vista de administración del personal de la clínica (tabla
- * 'usuarios'). Solo llega aquí ADMINISTRADOR — igual que
+ * 'usuarios'). Solo llega aquí ADMIN — igual que
  * CatalogoScreen y ReportesScreen, el guard de vista vive en App.tsx
  * y en el menú de MainLayout, así que este componente puede llamar a
  * crearUsuario() directamente y confiar en que la RLS del motor
@@ -27,8 +27,8 @@ import type { Ubicacion, Enums } from '../types/database.types'
  */
 
 const ETIQUETAS_ROL: Record<Enums<'rol_usuario'>, string> = {
-  ADMINISTRADOR: 'Administrador',
-  PERSONAL_CLINICA: 'Personal de Clínica',
+  ADMIN: 'Administrador',
+  ENCARGADO_FARMACIA: 'Encargado de Farmacia',
 }
 
 const ROLES = Object.keys(ETIQUETAS_ROL) as Enums<'rol_usuario'>[]
@@ -230,7 +230,7 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [mostrarPassword, setMostrarPassword] = useState(false)
-  const [rol, setRol] = useState<Enums<'rol_usuario'>>('PERSONAL_CLINICA')
+  const [rol, setRol] = useState<Enums<'rol_usuario'>>('ENCARGADO_FARMACIA')
   const [ubicacionId, setUbicacionId] = useState('')
   const [activo, setActivo] = useState(true)
 
@@ -243,8 +243,8 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
     setError(null)
     setExito(null)
 
-    if (rol === 'PERSONAL_CLINICA' && !ubicacionId) {
-      setError('El personal de clínica requiere una ubicación asignada.')
+    if (rol === 'ENCARGADO_FARMACIA' && !ubicacionId) {
+      setError('El encargado de farmacia requiere una ubicación asignada.')
       return
     }
 
@@ -256,7 +256,7 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
       email: email.trim(),
       password,
       rol,
-      ubicacion_id: rol === 'PERSONAL_CLINICA' ? ubicacionId : null,
+      ubicacion_id: rol === 'ENCARGADO_FARMACIA' ? ubicacionId : null,
       activo,
     })
 
@@ -275,7 +275,7 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
     setEmail('')
     setPassword('')
     setMostrarPassword(false)
-    setRol('PERSONAL_CLINICA')
+    setRol('ENCARGADO_FARMACIA')
     setUbicacionId('')
     setActivo(true)
     onCreado()
@@ -417,8 +417,8 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
           </p>
         </div>
 
-        {/* Ubicación — obligatoria solo para Personal de Clínica */}
-        {rol === 'PERSONAL_CLINICA' && (
+        {/* Ubicación — obligatoria solo para Encargado de Farmacia */}
+        {rol === 'ENCARGADO_FARMACIA' && (
           <div>
             <label htmlFor="usr-ubicacion" className={claseLabel}>
               Ubicación asignada
@@ -439,7 +439,7 @@ function FormularioUsuario({ ubicaciones, onCreado, onCancelar }: FormularioUsua
               ))}
             </select>
             <p className="mt-1 text-[10px] text-text-muted">
-              Requerida: el personal de clínica siempre opera desde un área fija.
+              Requerida: el encargado de farmacia siempre opera desde un área fija.
             </p>
           </div>
         )}

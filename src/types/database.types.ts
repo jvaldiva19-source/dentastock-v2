@@ -60,7 +60,7 @@ export interface Database {
           id: string
           codigo: string
           nombre: string
-          tipo: string
+          tipo: 'ALMACEN_CENTRAL' | 'FARMACIA'
           es_destino_final: boolean
           activo: boolean
           created_at: string
@@ -69,7 +69,7 @@ export interface Database {
           id?: string
           codigo: string
           nombre: string
-          tipo: string
+          tipo: 'ALMACEN_CENTRAL' | 'FARMACIA'
           es_destino_final?: boolean
           activo?: boolean
           created_at?: string
@@ -78,7 +78,7 @@ export interface Database {
           id?: string
           codigo?: string
           nombre?: string
-          tipo?: string
+          tipo?: 'ALMACEN_CENTRAL' | 'FARMACIA'
           es_destino_final?: boolean
           activo?: boolean
           created_at?: string
@@ -367,6 +367,7 @@ export interface Database {
           numero_factura: string | null
           proveedor_id: string | null
           comentario: string | null
+          alumno_referencia: string | null
           usuario_id: string
           movimiento_padre_id: string | null
           created_at: string
@@ -383,6 +384,7 @@ export interface Database {
           numero_factura?: string | null
           proveedor_id?: string | null
           comentario?: string | null
+          alumno_referencia?: string | null
           usuario_id: string
           movimiento_padre_id?: string | null
           created_at?: string
@@ -399,6 +401,7 @@ export interface Database {
           numero_factura?: string | null
           proveedor_id?: string | null
           comentario?: string | null
+          alumno_referencia?: string | null
           usuario_id?: string
           movimiento_padre_id?: string | null
           created_at?: string
@@ -506,6 +509,42 @@ export interface Database {
           precio_unitario: number | null
           valor_total: number | null
           estado: string | null
+          ubicacion_id: string | null
+        }
+        Relationships: []
+      }
+      v_stock_farmacia: {
+        Row: {
+          id: string | null
+          ubicacion_id: string | null
+          ubicacion_nombre: string | null
+          ubicacion_codigo: string | null
+          producto_id: string | null
+          codigo_barras: string | null
+          concepto: string | null
+          unidad_medida: Database['public']['Enums']['unidad_medida'] | null
+          requiere_lote: boolean | null
+          stock_minimo: number | null
+          punto_reorden: number | null
+          cantidad_actual: number | null
+          ultima_actualizacion: string | null
+          categoria: string | null
+        }
+        Relationships: []
+      }
+      v_consumo_practicas: {
+        Row: {
+          id: string | null
+          created_at: string | null
+          ubicacion_origen_id: string | null
+          farmacia: string | null
+          producto_id: string | null
+          concepto: string | null
+          codigo_barras: string | null
+          cantidad: number | null
+          alumno_referencia: string | null
+          comentario: string | null
+          registrado_por: string | null
         }
         Relationships: []
       }
@@ -537,8 +576,9 @@ export interface Database {
         | 'AJUSTE_POSITIVO'
         | 'AJUSTE_NEGATIVO'
         | 'DEVOLUCION_PROVEEDOR'
+        | 'SALIDA_PRACTICA'
       estado_lote: 'ACTIVO' | 'AGOTADO' | 'VENCIDO' | 'CUARENTENA'
-      rol_usuario: 'ADMINISTRADOR' | 'PERSONAL_CLINICA'
+      rol_usuario: 'ADMIN' | 'ENCARGADO_FARMACIA'
       grupo_financiero_categoria: 'MATERIAL_DENTAL' | 'MATERIAL_LIMPIEZA'
       unidad_medida:
         | 'PIEZA'
@@ -593,3 +633,5 @@ export type Proveedor = Tables<'proveedores'>
 export type Ubicacion = Tables<'ubicaciones'>
 export type RolUsuario = Enums<'rol_usuario'>
 export type TipoMovimiento = Enums<'tipo_movimiento'>
+export type StockFarmacia = Views<'v_stock_farmacia'>
+export type ConsumoPractica = Views<'v_consumo_practicas'>

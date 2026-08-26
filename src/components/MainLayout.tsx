@@ -23,14 +23,21 @@ import type { RolUsuario } from '../types/database.types'
  * pieza como pendiente si no la tienes ya.
  */
 
-export type VistaPrincipal = 'dashboard' | 'catalogo' | 'movimientos' | 'reportes' | 'usuarios'
+export type VistaPrincipal =
+  | 'dashboard'
+  | 'catalogo'
+  | 'movimientos'
+  | 'reportes'
+  | 'usuarios'
+  | 'farmacias'
+  | 'mi-farmacia'
 
 export interface UsuarioEnLayout {
   /** nombreCompleto si existe, o nombreUsuario como respaldo */
   nombre: string
   rol: RolUsuario
   /** Nombre legible de la ubicación asignada, ya resuelto por el contenedor.
-   *  null para ADMINISTRADOR (no tiene una sola área fija) o mientras carga. */
+   *  null para ADMIN (no tiene una sola área fija) o mientras carga. */
   ubicacionNombre: string | null
 }
 
@@ -113,6 +120,17 @@ function IconoUsuarios({ className }: { className?: string }) {
   )
 }
 
+function IconoFarmacias({ className }: { className?: string }) {
+  return (
+    <svg {...trazoBase(className)}>
+      <path d="M6.5 2.5h7l-1 3.2h-5l-1-3.2Z" />
+      <path d="M7.2 5.7 4.5 17.5h11l-2.7-11.8" />
+      <path d="M10 9.2v5.2" />
+      <path d="M7.4 11.8h5.2" />
+    </svg>
+  )
+}
+
 function IconoSalir({ className }: { className?: string }) {
   return (
     <svg {...trazoBase(className)}>
@@ -151,42 +169,37 @@ interface ItemNav {
   etiqueta: string
   icono: ComponentType<{ className?: string }>
   /**
-   * El catálogo maestro y los reportes de auditoría/costos quedan
-   * reservados a ADMINISTRADOR, en línea con el límite de rol definido
-   * desde el primer documento de arquitectura: "Personal de Clínica
-   * con permisos limitados a registrar salidas y mermas". Si tu
-   * intención actual es que PERSONAL_CLINICA también vea estas dos
-   * secciones (aunque sea en modo solo lectura), dímelo y quito esta
-   * bandera en vez de dejar una restricción que no querías.
+   * Roles que pueden ver este ítem de navegación. Reemplaza la antigua
+   * bandera booleana soloAdministrador?: con el nuevo modelo de dos
+   * roles con conjuntos de vistas completamente distintos (ver
+   * VISTAS_POR_ROL en App.tsx) ya no existe ninguna vista "para todos"
+   * — cada ítem debe declarar explícitamente sus roles permitidos.
    */
-  soloAdministrador?: boolean
+  rolesPermitidos: RolUsuario[]
 }
 
 const ITEMS_NAV: ItemNav[] = [
-  { id: 'dashboard', etiqueta: 'Dashboard y Alertas', icono: IconoDashboard },
+  { id: 'dashboard', etiqueta: 'Dashboard y Alertas', icono: IconoDashboard, rolesPermitidos: ['ADMIN'] },
+  { id: 'catalogo', etiqueta: 'Catálogo de Insumos', icono: IconoCatalogo, rolesPermitidos: ['ADMIN'] },
+  { id: 'movimientos', etiqueta: 'Registro de Movimientos', icono: IconoMovimientos, rolesPermitidos: ['ADMIN'] },
+  { id: 'reportes', etiqueta: 'Reportes de Auditoría', icono: IconoReportes, rolesPermitidos: ['ADMIN'] },
+  { id: 'usuarios', etiqueta: 'Gestión de Usuarios', icono: IconoUsuarios, rolesPermitidos: ['ADMIN'] },
   {
-    id: 'catalogo',
-    etiqueta: 'Catálogo de Insumos',
-    icono: IconoCatalogo,
-    soloAdministrador: true,
-  },
-  { id: 'movimientos', etiqueta: 'Registro de Movimientos', icono: IconoMovimientos },
-  {
-    id: 'reportes',
-    etiqueta: 'Reportes de Auditoría',
-    icono: IconoReportes,
-    soloAdministrador: true,
+    id: 'farmacias',
+    etiqueta: 'Gestión y Analítica de Farmacias',
+    icono: IconoFarmacias,
+    rolesPermitidos: ['ADMIN'],
   },
   {
-    id: 'usuarios',
-    etiqueta: 'Gestión de Usuarios',
-    icono: IconoUsuarios,
-    soloAdministrador: true,
+    id: 'mi-farmacia',
+    etiqueta: 'Mi Farmacia',
+    icono: IconoFarmacias,
+    rolesPermitidos: ['ENCARGADO_FARMACIA'],
   },
 ]
 
 function etiquetaRol(rol: RolUsuario): string {
-  return rol === 'ADMINISTRADOR' ? 'Administrador' : 'Personal Clínica'
+  return rol === 'ADMIN' ? 'Administrador' : 'Encargado de Farmacia'
 }
 
 // ------------------------------------------------------------------
@@ -203,9 +216,7 @@ export function MainLayout({
   const [cerrandoSesion, setCerrandoSesion] = useState(false)
   const [errorCierre, setErrorCierre] = useState<string | null>(null)
 
-  const itemsVisibles = ITEMS_NAV.filter(
-    (item) => !item.soloAdministrador || usuario.rol === 'ADMINISTRADOR',
-  )
+  const itemsVisibles = ITEMS_NAV.filter((item) => item.rolesPermitidos.includes(usuario.rol))
 
   async function manejarCerrarSesion() {
     setCerrandoSesion(true)

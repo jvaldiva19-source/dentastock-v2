@@ -237,7 +237,7 @@ export async function getSession(): Promise<AuthResult<Session | null>> {
  * Recupera el perfil de dominio completo del usuario autenticado:
  * toma el id de sesión (auth.uid(), implícito en session.user.id) y
  * hace el join contra la tabla pública 'usuarios' para traer el rol
- * ('ADMINISTRADOR' | 'PERSONAL_CLINICA') y la ubicacion_id asignada.
+ * ('ADMIN' | 'ENCARGADO_FARMACIA') y la ubicacion_id asignada.
  *
  * Esta es la única vía recomendada para que la UI sepa "quién es" el
  * usuario en términos de negocio. La política RLS 'usuarios_lectura_propio'

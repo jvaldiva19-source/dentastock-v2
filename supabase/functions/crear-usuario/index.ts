@@ -6,13 +6,13 @@
 // y ese método SOLO está disponible con la Service Role Key — una clave
 // que nunca debe llegar al navegador (bypassa RLS por completo). Por la
 // misma razón se descartó `supabase.auth.signUp()` desde el cliente: al
-// llamarse con una sesión de ADMINISTRADOR ya activa, signUp() puede
+// llamarse con una sesión de ADMIN ya activa, signUp() puede
 // reemplazar esa sesión por la del usuario recién creado, cerrando la
 // sesión del administrador sin aviso.
 //
 // Flujo:
 //   1. Verifica que quien llama tiene una sesión válida (Authorization
-//      header) y que su rol en 'usuarios' es ADMINISTRADOR — el motor
+//      header) y que su rol en 'usuarios' es ADMIN — el motor
 //      es la garantía real (RLS), pero aquí se revisa explícitamente
 //      porque esta función usa un cliente con privilegios totales.
 //   2. Crea la cuenta de Auth (auth.admin.createUser) con el correo y
@@ -84,7 +84,7 @@ Deno.serve(async (req: Request) => {
       .eq('auth_id', sesion.user.id)
       .single()
 
-    if (errorPerfil || !perfilLlamador || perfilLlamador.rol !== 'ADMINISTRADOR') {
+    if (errorPerfil || !perfilLlamador || perfilLlamador.rol !== 'ADMIN') {
       return respuestaError(403, 'Tu usuario no tiene permisos para crear nuevos usuarios.')
     }
 
@@ -102,11 +102,11 @@ Deno.serve(async (req: Request) => {
     if (!nombreCompleto || !nombreUsuario || !email || !password || !rol) {
       return respuestaError(400, 'Faltan campos obligatorios para crear el usuario.')
     }
-    if (rol !== 'ADMINISTRADOR' && rol !== 'PERSONAL_CLINICA') {
+    if (rol !== 'ADMIN' && rol !== 'ENCARGADO_FARMACIA') {
       return respuestaError(400, 'Rol inválido.')
     }
-    if (rol === 'PERSONAL_CLINICA' && !ubicacionId) {
-      return respuestaError(400, 'El personal de clínica requiere una ubicación asignada.')
+    if (rol === 'ENCARGADO_FARMACIA' && !ubicacionId) {
+      return respuestaError(400, 'El encargado de farmacia requiere una ubicación asignada.')
     }
     if (typeof password !== 'string' || password.length < 8) {
       return respuestaError(400, 'La contraseña debe tener al menos 8 caracteres.')
@@ -137,7 +137,7 @@ Deno.serve(async (req: Request) => {
         nombre_usuario: String(nombreUsuario).trim().toLowerCase(),
         email,
         rol,
-        ubicacion_id: rol === 'PERSONAL_CLINICA' ? ubicacionId : null,
+        ubicacion_id: rol === 'ENCARGADO_FARMACIA' ? ubicacionId : null,
         activo: activo ?? true,
       })
       .select()

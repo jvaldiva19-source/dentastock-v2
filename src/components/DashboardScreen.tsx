@@ -166,6 +166,7 @@ const ESTILO_TIPO_MOVIMIENTO: Record<TipoMovimiento, { texto: string; etiqueta: 
   AJUSTE_POSITIVO: { texto: 'text-status-ok', etiqueta: 'Ajuste (+)' },
   AJUSTE_NEGATIVO: { texto: 'text-status-critico', etiqueta: 'Ajuste (-)' },
   DEVOLUCION_PROVEEDOR: { texto: 'text-status-critico', etiqueta: 'Devolución' },
+  SALIDA_PRACTICA: { texto: 'text-text-primary', etiqueta: 'Salida (práctica)' },
 }
 
 // ------------------------------------------------------------------

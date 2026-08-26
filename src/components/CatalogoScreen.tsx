@@ -19,7 +19,7 @@ import type { Categoria, TablesInsert, TablesUpdate, Enums } from '../types/data
  * src/components/CatalogoScreen.tsx
  *
  * Pantalla de administración del catálogo maestro de insumos. Solo
- * llega aquí el rol ADMINISTRADOR — el guard de vista ya está en
+ * llega aquí el rol ADMIN — el guard de vista ya está en
  * App.tsx y en el menú de MainLayout — por lo tanto este componente
  * no necesita verificar rol ni pasar perfil: puede llamar a
  * crearProducto() / actualizarProducto() directamente y la RLS del

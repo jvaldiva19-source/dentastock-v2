@@ -61,7 +61,8 @@ import { PanelAnalitica } from './dashboard/PanelAnalitica'
 const formatoMoneda = new Intl.NumberFormat('es-MX', {
   style: 'currency',
   currency: 'MXN',
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 })
 
 const formatoFecha = new Intl.DateTimeFormat('es-MX', {

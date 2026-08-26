@@ -46,7 +46,8 @@ const COLOR_SERIE_2 = '#eb6834' // Salidas / Merma por caducidad
 const formatoMoneda = new Intl.NumberFormat('es-MX', {
   style: 'currency',
   currency: 'MXN',
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 })
 
 const formatoEntero = new Intl.NumberFormat('es-MX')

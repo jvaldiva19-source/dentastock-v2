@@ -788,6 +788,13 @@ export interface ResumenAuditoria {
  * { count: 'exact', head: true } — Postgres calcula el conteo exacto
  * en el servidor sin devolver filas, así que nunca queda sujeto al
  * límite de 1000 que sí aplica a las respuestas con datos.
+ *
+ * La consulta a v_valorizacion_inventario filtra estado = 'ACTIVO':
+ * la vista incluye tanto productos activos como desactivados (columna
+ * estado, ver 20260722120100_fix_valorizacion_inventario_por_lote.sql),
+ * y sin este filtro valorTotalInventario sumaba también el valor de
+ * existencias de productos desactivados, inflando el KPI del Dashboard
+ * por encima del valor real del inventario vigente.
  */
 export async function obtenerResumenAuditoria(): Promise<
   ReportesResult<ResumenAuditoria>
@@ -803,6 +810,7 @@ export async function obtenerResumenAuditoria(): Promise<
           supabase
             .from('v_valorizacion_inventario')
             .select('valor_total')
+            .eq('estado', 'ACTIVO')
             .order('area', { ascending: true })
             .order('codigo_barras', { ascending: true })
             .range(desde, hasta),

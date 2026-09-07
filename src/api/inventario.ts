@@ -1,7 +1,14 @@
 import { supabase } from '../lib/supabase'
 import { type Result, okResult, failResult } from '../lib/result'
 import { obtenerTodasLasFilas } from '../lib/paginacion'
-import type { StockUbicacion, TipoMovimiento, Views, StockFarmacia, ConsumoPractica } from '../types/database.types'
+import type {
+  StockUbicacion,
+  TipoMovimiento,
+  Views,
+  StockFarmacia,
+  ConsumoPractica,
+  DisponibilidadAlmacenCentral,
+} from '../types/database.types'
 
 /**
  * src/api/inventario.ts
@@ -451,6 +458,51 @@ export async function obtenerConsumoPracticas(
     return fail(
       'ERROR_RED',
       'No fue posible conectar con el servidor para consultar el consumo por práctica.',
+    )
+  }
+}
+
+// ------------------------------------------------------------------
+// 8. obtenerDisponibilidadAlmacenCentral
+// ------------------------------------------------------------------
+
+/**
+ * Consulta v_disponibilidad_almacen_central (migración 20260828100000):
+ * existencias de Almacén Central sin ninguna columna de precio/costo, para
+ * que un ENCARGADO_FARMACIA verifique disponibilidad antes de solicitar un
+ * traspaso. A diferencia de obtenerStockFarmacia(), esta vista corre con
+ * los privilegios de su propietario (no security_invoker), precisamente
+ * para que un encargado pueda ver el stock de Almacén Central aunque la
+ * política RESTRICTIVE de stock_ubicacion lo limite a su propia ubicación
+ * — la seguridad de la consulta la da la propia vista, que jamás expone
+ * columnas monetarias.
+ */
+export async function obtenerDisponibilidadAlmacenCentral(): Promise<
+  InventarioResult<DisponibilidadAlmacenCentral[]>
+> {
+  try {
+    const { data, error } = await obtenerTodasLasFilas((desde, hasta) =>
+      supabase
+        .from('v_disponibilidad_almacen_central')
+        .select('*')
+        .order('concepto', { ascending: true })
+        .range(desde, hasta),
+    )
+
+    if (error) {
+      console.error('[inventario] obtenerDisponibilidadAlmacenCentral:', error)
+      return fail(
+        'CONSULTA_FALLIDA',
+        'No se pudo consultar la disponibilidad de Almacén Central. Intenta de nuevo.',
+      )
+    }
+
+    return ok(data ?? [])
+  } catch (err) {
+    console.error('[inventario] obtenerDisponibilidadAlmacenCentral (excepción):', err)
+    return fail(
+      'ERROR_RED',
+      'No fue posible conectar con el servidor para consultar Almacén Central.',
     )
   }
 }

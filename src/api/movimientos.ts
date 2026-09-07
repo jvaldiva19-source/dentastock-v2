@@ -240,15 +240,25 @@ export interface DatosTraspaso {
 /**
  * Registra un traspaso entre dos ubicaciones como una operación
  * atómica de dos filas (TRASPASO_SALIDA + TRASPASO_ENTRADA), usando
- * la función de PostgreSQL fn_registrar_traspaso vía RPC.
+ * la función de PostgreSQL fn_registrar_traspaso vía RPC. Desplegada
+ * en supabase/migrations/20260828100000_traspasos_intersedes_almacen_
+ * central_unpacking.sql — ese archivo es la única fuente de verdad del
+ * DDL, no se duplica aquí.
  *
- * IMPORTANTE — requiere desplegar esta función en una migración SQL
- * antes de que esta llamada funcione. El DDL completo está al final
- * de este archivo, como referencia, para copiar a
- * supabase/migrations/. No se incluye aquí como SQL embebido porque
- * el DDL no es responsabilidad de la capa TypeScript — vive en
- * supabase/migrations/, consistente con la estructura de carpetas
- * de docs/arquitectura.md.
+ * Esta única función cubre tres flujos, todos autorizados dentro de
+ * fn_registrar_traspaso (no en RLS, que solo queda como defensa en
+ * profundidad — ver la migración):
+ *   - ADMIN: cualquier origen/destino (uso típico: Almacén Central -> área).
+ *   - ENCARGADO_FARMACIA recibiendo: origen = Almacén Central, destino =
+ *     su propia farmacia.
+ *   - ENCARGADO_FARMACIA enviando a otra sede (traspaso inter-farmacias):
+ *     origen = su propia farmacia, destino = cualquier otra farmacia activa.
+ *
+ * Conversión de unidad de empaque: cuando el origen es Almacén Central y
+ * el destino es una farmacia, la cantidad que llega al stock del destino
+ * se multiplica dentro del RPC por productos.piezas_por_empaque — esta
+ * función de TypeScript sigue enviando la cantidad tal cual la capturó el
+ * usuario (empaques), la conversión a piezas ocurre en el servidor.
  *
  * Por qué RPC y no dos .insert() encadenados desde el cliente: si la
  * conexión del cliente se interrumpe entre el primer y el segundo
@@ -572,57 +582,3 @@ export async function registrarSalidaPractica(
     )
   }
 }
-
-/* ====================================================================
- * DDL DE REFERENCIA — fn_registrar_traspaso
- * ====================================================================
- *
- * Esta función NO es TypeScript: es el contrato de PostgreSQL que
- * registrarTraspaso() invoca vía supabase.rpc(). Cópiala a una nueva
- * migración (ej. supabase/migrations/20240102_001_fn_registrar_traspaso.sql)
- * y despliégala antes de probar registrarTraspaso() en el frontend.
- *
- * CREATE OR REPLACE FUNCTION fn_registrar_traspaso(
- *     p_producto_id          UUID,
- *     p_ubicacion_origen_id  UUID,
- *     p_ubicacion_destino_id UUID,
- *     p_cantidad             INTEGER,
- *     p_usuario_id           UUID,
- *     p_lote_id              UUID DEFAULT NULL
- * )
- * RETURNS JSON AS $$
- * DECLARE
- *     v_salida  movimientos;
- *     v_entrada movimientos;
- * BEGIN
- *     INSERT INTO movimientos (
- *         tipo, producto_id, lote_id, ubicacion_origen_id,
- *         cantidad, usuario_id
- *     ) VALUES (
- *         'TRASPASO_SALIDA', p_producto_id, p_lote_id, p_ubicacion_origen_id,
- *         p_cantidad, p_usuario_id
- *     ) RETURNING * INTO v_salida;
- *
- *     INSERT INTO movimientos (
- *         tipo, producto_id, lote_id, ubicacion_destino_id,
- *         cantidad, usuario_id
- *     ) VALUES (
- *         'TRASPASO_ENTRADA', p_producto_id, p_lote_id, p_ubicacion_destino_id,
- *         p_cantidad, p_usuario_id
- *     ) RETURNING * INTO v_entrada;
- *
- *     -- Ambos INSERT viven en la misma transacción de PostgreSQL que
- *     -- envuelve a esta función: si el segundo INSERT falla (por
- *     -- ejemplo, por un trigger que rechace stock negativo en un
- *     -- escenario de autoconsumo en el propio origen), el primero se
- *     -- revierte automáticamente. No se requiere BEGIN/COMMIT manual.
- *
- *     RETURN json_build_array(row_to_json(v_salida), row_to_json(v_entrada));
- * END;
- * $$ LANGUAGE plpgsql SECURITY INVOKER;
- *
- * SECURITY INVOKER (no DEFINER) es deliberado: la función debe ejecutarse
- * con los privilegios del usuario que la invoca, para que las políticas
- * RLS de 'movimientos' (movimientos_insert_admin, etc.) sigan aplicándose
- * normalmente dentro de la función, en lugar de saltárselas.
- * ==================================================================== */

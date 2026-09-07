@@ -143,6 +143,7 @@ export interface Database {
           requiere_lote: boolean
           activo: boolean
           imagen_url: string | null
+          piezas_por_empaque: number
           created_at: string
           updated_at: string
         }
@@ -161,6 +162,7 @@ export interface Database {
           requiere_lote?: boolean
           activo?: boolean
           imagen_url?: string | null
+          piezas_por_empaque?: number
           created_at?: string
           updated_at?: string
         }
@@ -179,6 +181,7 @@ export interface Database {
           requiere_lote?: boolean
           activo?: boolean
           imagen_url?: string | null
+          piezas_por_empaque?: number
           created_at?: string
           updated_at?: string
         }
@@ -548,6 +551,16 @@ export interface Database {
         }
         Relationships: []
       }
+      v_disponibilidad_almacen_central: {
+        Row: {
+          id: string | null
+          codigo_barras: string | null
+          concepto: string | null
+          categoria: string | null
+          cantidad_actual_central: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       fn_obtener_rol_actual: {
@@ -635,3 +648,4 @@ export type RolUsuario = Enums<'rol_usuario'>
 export type TipoMovimiento = Enums<'tipo_movimiento'>
 export type StockFarmacia = Views<'v_stock_farmacia'>
 export type ConsumoPractica = Views<'v_consumo_practicas'>
+export type DisponibilidadAlmacenCentral = Views<'v_disponibilidad_almacen_central'>

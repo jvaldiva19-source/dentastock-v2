@@ -396,6 +396,7 @@ function FormularioProducto({
   const [diasReorden, setDiasReorden] = useState(
     p?.dias_reorden != null ? String(p.dias_reorden) : '15',
   )
+  const [piezasPorEmpaque, setPiezasPorEmpaque] = useState(String(p?.piezas_por_empaque ?? 1))
   const [requiereLote, setRequiereLote] = useState(p?.requiere_lote ?? false)
   const [activo, setActivo] = useState(p?.activo ?? true)
 
@@ -428,6 +429,12 @@ function FormularioProducto({
       return
     }
 
+    const cantPiezasPorEmpaque = Number(piezasPorEmpaque)
+    if (!Number.isFinite(cantPiezasPorEmpaque) || cantPiezasPorEmpaque < 1) {
+      setError('Las piezas por empaque deben ser un número entero mayor o igual a 1.')
+      return
+    }
+
     const payload = {
       codigo_barras: codigoBarras.trim().toUpperCase(),
       concepto: concepto.trim(),
@@ -439,6 +446,7 @@ function FormularioProducto({
       stock_minimo: cantMinimo,
       punto_reorden: cantReorden,
       dias_reorden: diasReorden ? Number(diasReorden) : null,
+      piezas_por_empaque: Math.trunc(cantPiezasPorEmpaque),
       requiere_lote: requiereLote,
       activo,
     }
@@ -622,8 +630,8 @@ function FormularioProducto({
           </div>
         </div>
 
-        {/* Fila 4: Stock mínimo + Punto de reorden + Días */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Fila 4: Stock mínimo + Punto de reorden + Días + Piezas por empaque */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div>
             <label htmlFor="cat-minimo" className={claseLabel}>
               Stock mínimo crítico
@@ -669,6 +677,27 @@ function FormularioProducto({
               className={claseInput}
               placeholder="15"
             />
+          </div>
+          <div>
+            <label htmlFor="cat-piezas-empaque" className={claseLabel}>
+              Piezas por empaque
+            </label>
+            <input
+              id="cat-piezas-empaque"
+              type="number"
+              min={1}
+              step={1}
+              required
+              value={piezasPorEmpaque}
+              disabled={enviando}
+              onChange={(e) => setPiezasPorEmpaque(e.target.value)}
+              className={claseInput}
+              placeholder="1"
+            />
+            <p className="mt-1 text-[10px] text-text-muted">
+              Piezas clínicas que contiene cada empaque surtido desde Almacén Central. Ej. 25 en una
+              caja de abatelenguas.
+            </p>
           </div>
         </div>
 
